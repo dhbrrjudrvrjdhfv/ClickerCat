@@ -1,4 +1,4 @@
-// public/script.js — Updated to use server
+// public/script.js — Updated: Day counter from server, no date math
 const mole = document.getElementById('mole');
 const main = document.querySelector('.main');
 const stats = document.querySelectorAll('.stat');
@@ -55,13 +55,19 @@ function showGameOver() {
 async function triggerDayEnd() {
   if (totalSecondsLeft > 0 || !timerRunning) return;
 
-  const state = await fetchState();
-  if (state.todayClicks >= state.yesterdayClicks) {
-    // Win: reset for next day
-    totalSecondsLeft = 24 * 60 * 60;
-    updateTimer();
-    updateDisplay(state);
-  } else {
+  try {
+    const res = await fetch('/api/day-end', { method: 'POST' });
+    const data = await res.json();
+    if (data.lost) {
+      showGameOver();
+    } else {
+      // Win: reset timer
+      totalSecondsLeft = 24 * 60 * 60;
+      updateTimer();
+      fetchState(); // Refresh stats
+    }
+  } catch (err) {
+    console.error('Day end failed:', err);
     showGameOver();
   }
 }
