@@ -1,4 +1,4 @@
-// public/script.js — Updated: Day counter from server, no date math
+// public/script.js — FINAL: Works with fixed HTML
 const mole = document.getElementById('mole');
 const main = document.querySelector('.main');
 const stats = document.querySelectorAll('.stat');
@@ -31,7 +31,6 @@ skipDayBtn.addEventListener('click', () => {
   triggerDayEnd();
 });
 
-// Update timer display
 function updateTimer() {
   const hours = Math.floor(totalSecondsLeft / 3600);
   const minutes = Math.floor((totalSecondsLeft % 3600) / 60);
@@ -39,7 +38,6 @@ function updateTimer() {
   timeLeftValue.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
-// Show game over
 function showGameOver() {
   gameLost = true;
   timerRunning = false;
@@ -51,20 +49,20 @@ function showGameOver() {
   });
 }
 
-// Check win/lose at day end
 async function triggerDayEnd() {
   if (totalSecondsLeft > 0 || !timerRunning) return;
 
+  console.log('Day ending...');
   try {
     const res = await fetch('/api/day-end', { method: 'POST' });
     const data = await res.json();
+    console.log('Day end response:', data);
     if (data.lost) {
       showGameOver();
     } else {
-      // Win: reset timer
       totalSecondsLeft = 24 * 60 * 60;
       updateTimer();
-      fetchState(); // Refresh stats
+      fetchState();
     }
   } catch (err) {
     console.error('Day end failed:', err);
@@ -72,7 +70,6 @@ async function triggerDayEnd() {
   }
 }
 
-// Countdown
 setInterval(() => {
   if (timerRunning && totalSecondsLeft > 0) {
     totalSecondsLeft--;
@@ -81,20 +78,17 @@ setInterval(() => {
   }
 }, 1000);
 
-// Fetch real game state from server
 async function fetchState() {
   try {
     const res = await fetch('/api/state');
     const data = await res.json();
+    console.log('State:', data);
     updateDisplay(data);
-    return data;
   } catch (err) {
     console.error('State error:', err);
-    return { todayClicks: 0, yesterdayClicks: 0, remaining: 0, day: 100 };
   }
 }
 
-// Update UI from server data
 function updateDisplay(data) {
   todayClicksValue.textContent = data.todayClicks || 0;
   yesterdayClicksValue.textContent = data.yesterdayClicks || 0;
@@ -102,18 +96,20 @@ function updateDisplay(data) {
   dayCounterValue.textContent = data.day || 100;
 }
 
-// Send click to server
 async function recordClick() {
   if (!timerRunning || gameLost) return;
+  console.log('Click sent');
   try {
-    await fetch('/api/click', { method: 'POST' });
-    await fetchState(); // Refresh stats
+    const res = await fetch('/api/click', { method: 'POST' });
+    console.log('Click status:', res.status);
+    if (res.ok) {
+      fetchState();
+    }
   } catch (err) {
     console.error('Click failed:', err);
   }
 }
 
-// Mole movement
 function getRandomPosition() {
   const mainRect = main.getBoundingClientRect();
   const buttonRect = mole.getBoundingClientRect();
@@ -137,13 +133,11 @@ function moveMole() {
 
 moveMole();
 
-// Click handler
 mole.addEventListener('click', (e) => {
   e.stopPropagation();
   recordClick();
   moveMole();
 });
 
-// Start timer & load initial state
 updateTimer();
 fetchState();
