@@ -1,45 +1,57 @@
-<!-- index.html -->
+<!-- public/index.html — FIXED: script at bottom, id="mole", debug log -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Click Tracker</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ClickerCat</title>
+  <link rel="stylesheet" href="style.css" />
+  
+  <!-- DEBUG: Check if mole exists -->
+  <script>
+    window.addEventListener('load', () => {
+      const mole = document.getElementById('mole');
+      console.log('Mole element:', mole);
+      if (!mole) {
+        console.error('ERROR: <button id="mole"> not found! Check HTML.');
+      }
+    });
+  </script>
 </head>
 <body>
-<header class="header">
-<div class="stat">
-<div class="label">Yesterday's Clicks</div>
-<div class="value">0</div>
-</div>
-<div class="stat">
-<div class="label">Remaining Clicks</div>
-<div class="value">0</div>
-</div>
-<div class="stat center">
-<div class="label">Today's Clicks</div>
-<div class="value">0</div>
-</div>
-<div class="stat">
-<div class="label">Time Left</div>
-<div class="value">24:00:00</div>
-</div>
-<div class="stat">
-<div class="label">Day Counter</div>
-<div class="value">100</div>
-</div>
-</header>
-<main class="main">
-<button id="mole" class="mole-button">Click Me</button>
-</main>
+  <div class="main">
+    <button id="mole">CLICK ME</button>
+  </div>
 
-<!-- DEV TOOLS - REMOVE LATER -->
-<div id="dev-tools" style="position: fixed; bottom: 10px; right: 10px; z-index: 1000; background: #000; padding: 8px; border-radius: 6px;">
-<button id="skip-hour" style="margin: 0 4px; padding: 6px 10px; font-family: monospace; background: #ff0; color: #000; border: 2px solid #000; font-weight: bold;">+1 Hour</button>
-<button id="skip-day" style="margin: 0 4px; padding: 6px 10px; font-family: monospace; background: #f0f; color: #fff; border: 2px solid #000; font-weight: bold;">Skip to Next Day</button>
-</div>
+  <div class="stats">
+    <div class="stat">
+      <span class="label">Yesterday's Clicks</span>
+      <span class="value">0</span>
+    </div>
+    <div class="stat">
+      <span class="label">Remaining</span>
+      <span class="value">0</span>
+    </div>
+    <div class="stat">
+      <span class="label">Today's Clicks</span>
+      <span class="value">0</span>
+    </div>
+    <div class="stat">
+      <span class="label">Time Left</span>
+      <span class="value">24:00:00</span>
+    </div>
+    <div class="stat">
+      <span class="label">Day</span>
+      <span class="value">100</span>
+    </div>
+  </div>
 
-<script src="script.js"></script>
+  <div class="dev-buttons">
+    <button id="skip-hour">Skip 1 Hour</button>
+    <button id="skip-day">Skip Day</button>
+  </div>
+
+  <!-- SCRIPT AT BOTTOM -->
+  <script src="script.js"></script>
 </body>
 </html>
