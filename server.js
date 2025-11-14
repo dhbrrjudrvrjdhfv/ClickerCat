@@ -1,4 +1,4 @@
-// server.js
+// server.js — FIXED: Day counter starts at 100, decrements only on day end
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -7,111 +7,148 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static('public')); // Serves index.html, style.css, script.js
+app.use(express.static('public'));
 
-// Connect to Render PostgreSQL
 const pool = new Pool({
-connectionString: process.env.DATABASE_URL,
-ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// Rate limiting: YOU set the limit
-const MAX_CLICKS_PER_SECOND = 5; // ← Change this number if you want
-const clickTimes = new Map(); // playerId → [timestamps]
+const MAX_CLICKS_PER_SECOND = 5;
+const clickTimes = new Map();
 
-// Initialize DB tables
+// Global day counter (starts at 100)
+let currentDay = 100;
+
+// Init DB
 async function initDB() {
-await pool.query(`
-CREATE TABLE IF NOT EXISTS players (
-id UUID PRIMARY KEY,
-created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS clicks (
-id SERIAL PRIMARY KEY,
-player_id UUID REFERENCES players(id),
-clicked_at TIMESTAMPTZ DEFAULT NOW(),
-day INTEGER NOT NULL
-);
-`);
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS players (
+        id UUID PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS clicks (
+        id SERIAL PRIMARY KEY,
+        player_id UUID REFERENCES players(id),
+        clicked_at TIMESTAMPTZ DEFAULT NOW(),
+        day INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS game_state (
+        key TEXT PRIMARY KEY,
+        value INTEGER
+      );
+    `);
+
+    // Load day from DB or start at 100
+    const res = await pool.query('SELECT value FROM game_state WHERE key = $1', ['current_day']);
+    if (res.rows.length > 0) {
+      currentDay = res.rows[0].value;
+    } else {
+      await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2)', ['current_day', 100]);
+    }
+
+    console.log(`DB ready. Current day: ${currentDay}`);
+  } catch (err) {
+    console.error('DB init error:', err);
+  }
 }
 initDB();
 
-// Get or create player ID
+// Get player ID
 function getPlayerId(req, res) {
-let playerId = req.cookies.playerId;
-if (!playerId) {
-playerId = uuidv4();
-res.cookie('playerId', playerId, {
-httpOnly: true,
-secure: process.env.NODE_ENV === 'production',
-maxAge: 10 * 365 * 24 * 60 * 60 * 1000
-});
-}
-return playerId;
+  let playerId = req.cookies.playerId;
+  if (!playerId) {
+    playerId = uuidv4();
+    res.cookie('playerId', playerId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 10 * 365 * 24 * 60 * 60 * 1000
+    });
+  }
+  return playerId;
 }
 
-// API: Record a click
+// Record click
 app.post('/api/click', async (req, res) => {
-const playerId = getPlayerId(req, res);
-const now = new Date();
+  const playerId = getPlayerId(req, res);
+  const now = new Date();
 
-// === RATE LIMIT: 5 clicks per second ===
-const times = clickTimes.get(playerId) || [];
-const recent = times.filter(t => now - t < 1000); // last 1 second
-if (recent.length >= MAX_CLICKS_PER_SECOND) {
-return res.status(429).json({ error: 'Too fast!' });
-}
-times.push(now);
-clickTimes.set(playerId, times.slice(-10)); // keep last 10
+  // Rate limit
+  const times = clickTimes.get(playerId) || [];
+  const recent = times.filter(t => now - t < 1000);
+  if (recent.length >= MAX_CLICKS_PER_SECOND) {
+    return res.status(429).json({ error: 'Too fast!' });
+  }
+  times.push(now);
+  clickTimes.set(playerId, times.slice(-10));
 
-// Calculate current day (Day 100 = start)
-const startDate = new Date('2025-01-01'); // Change if needed
-const day = 100 - Math.floor((now - startDate) / (24 * 60 * 60 * 1000));
-
-try {
-await pool.query(
-'INSERT INTO clicks (player_id, day) VALUES ($1, $2)',
-[playerId, day]
-);
-res.json({ success: true });
-} catch (err) {
-console.error(err);
-res.status(500).json({ error: 'DB error' });
-}
+  try {
+    await pool.query(
+      'INSERT INTO clicks (player_id, day) VALUES ($1, $2)',
+      [playerId, currentDay]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB error' });
+  }
 });
 
-// API: Get game state for this player
+// Get state
 app.get('/api/state', async (req, res) => {
-const playerId = req.cookies.playerId;
-const now = new Date();
-const startDate = new Date('2025-01-01');
-const day = 100 - Math.floor((now - startDate) / (24 * 60 * 60 * 1000));
+  const playerId = req.cookies.playerId;
+  try {
+    const [todayRes, yesterdayRes] = await Promise.all([
+      playerId
+        ? pool.query('SELECT COUNT(*) as count FROM clicks WHERE player_id = $1 AND day = $2', [playerId, currentDay])
+        : { rows: [{ count: '0' }] },
+      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1])
+    ]);
 
-try {
-const [todayRes, yesterdayRes] = await Promise.all([
-playerId
-? pool.query('SELECT COUNT(*) FROM clicks WHERE player_id = $1 AND day = $2', [playerId, day])
-: { rows: [{ count: 0 }] },
-pool.query('SELECT COUNT(*) FROM clicks WHERE day = $1', [day + 1])
-]);
+    const todayClicks = parseInt(todayRes.rows[0].count) || 0;
+    const yesterdayClicks = parseInt(yesterdayRes.rows[0].count) || 0;
+    const remaining = Math.max(0, yesterdayClicks - todayClicks);
 
-const todayClicks = parseInt(todayRes.rows[0].count) || 0;
-const yesterdayClicks = parseInt(yesterdayRes.rows[0].count) || 0;
-const remaining = Math.max(0, yesterdayClicks - todayClicks);
-
-res.json({
-day,
-todayClicks,
-yesterdayClicks,
-remaining
-});
-} catch (err) {
-res.status(500).json({ error: 'State error' });
-}
+    res.json({
+      day: currentDay,
+      todayClicks,
+      yesterdayClicks,
+      remaining
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'State error' });
+  }
 });
 
-// Start server
+// Trigger day end
+app.post('/api/day-end', async (req, res) => {
+  try {
+    const [todayTotal, yesterdayTotal] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay]),
+      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1])
+    ]);
+
+    const todayClicks = parseInt(todayTotal.rows[0].count) || 0;
+    const yesterdayClicks = parseInt(yesterdayTotal.rows[0].count) || 0;
+
+    if (todayClicks >= yesterdayClicks) {
+      // Win: decrement day
+      currentDay = Math.max(0, currentDay - 1);
+      await pool.query('UPDATE game_state SET value = $1 WHERE key = $2', [currentDay, 'current_day']);
+      console.log(`Day ended. New day: ${currentDay}`);
+      res.json({ success: true, newDay: currentDay });
+    } else {
+      res.json({ lost: true });
+    }
+  } catch (err) {
+    console.error('Day end error:', err);
+    res.json({ lost: true });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}, Day: ${currentDay}`);
 });
