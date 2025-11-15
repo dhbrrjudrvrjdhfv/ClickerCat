@@ -1,4 +1,4 @@
-// server.js — FINAL FIX: secure: true (Render HTTPS proxy)
+// server.js — Cookie fix: secure + sameSite: 'none'
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -17,10 +17,8 @@ const pool = new Pool({
 const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 
-// Global day counter (starts at 100)
 let currentDay = 100;
 
-// Init DB
 async function initDB() {
   try {
     await pool.query(`
@@ -40,7 +38,6 @@ async function initDB() {
       );
     `);
 
-    // Load day from DB or start at 100
     const res = await pool.query('SELECT value FROM game_state WHERE key = $1', ['current_day']);
     if (res.rows.length > 0) {
       currentDay = res.rows[0].value;
@@ -55,26 +52,24 @@ async function initDB() {
 }
 initDB();
 
-// Get player ID
 function getPlayerId(req, res) {
   let playerId = req.cookies.playerId;
   if (!playerId) {
     playerId = uuidv4();
     res.cookie('playerId', playerId, {
       httpOnly: true,
-      secure: true, // ← FIXED: Always secure on Render (HTTPS proxy)
+      secure: true,
+      sameSite: 'none',  // Required for Render HTTPS proxy
       maxAge: 10 * 365 * 24 * 60 * 60 * 1000
     });
   }
   return playerId;
 }
 
-// Record click
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
   const now = new Date();
 
-  // Rate limit
   const times = clickTimes.get(playerId) || [];
   const recent = times.filter(t => now - t < 1000);
   if (recent.length >= MAX_CLICKS_PER_SECOND) {
@@ -95,7 +90,6 @@ app.post('/api/click', async (req, res) => {
   }
 });
 
-// Get state
 app.get('/api/state', async (req, res) => {
   const playerId = req.cookies.playerId;
   try {
@@ -122,7 +116,6 @@ app.get('/api/state', async (req, res) => {
   }
 });
 
-// Trigger day end
 app.post('/api/day-end', async (req, res) => {
   try {
     const [todayTotal, yesterdayTotal] = await Promise.all([
@@ -134,7 +127,6 @@ app.post('/api/day-end', async (req, res) => {
     const yesterdayClicks = parseInt(yesterdayTotal.rows[0].count) || 0;
 
     if (todayClicks >= yesterdayClicks) {
-      // Win: decrement day
       currentDay = Math.max(0, currentDay - 1);
       await pool.query('UPDATE game_state SET value = $1 WHERE key = $2', [currentDay, 'current_day']);
       console.log(`Day ended. New day: ${currentDay}`);
