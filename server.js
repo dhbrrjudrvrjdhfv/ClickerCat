@@ -1,4 +1,4 @@
-// server.js — FINAL: Insert player into DB when creating cookie
+// server.js — FIXED: Insert player before click, secure cookie
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -52,7 +52,7 @@ async function initDB() {
 }
 initDB();
 
-async function getPlayerId(req, res) {
+function getPlayerId(req, res) {
   let playerId = req.cookies.playerId;
   if (!playerId) {
     playerId = uuidv4();
@@ -62,34 +62,35 @@ async function getPlayerId(req, res) {
       sameSite: 'none',
       maxAge: 10 * 365 * 24 * 60 * 60 * 1000
     });
-
-    // INSERT NEW PLAYER INTO DB
-    try {
-      await pool.query('INSERT INTO players (id) VALUES ($1) ON CONFLICT DO NOTHING', [playerId]);
-    } catch (err) {
-      console.error('Failed to insert player:', err);
-    }
   }
   return playerId;
 }
 
 app.post('/api/click', async (req, res) => {
-  const playerId = await getPlayerId(req, res);
+  const playerId = getPlayerId(req, res);
   const now = new Date();
-
   const times = clickTimes.get(playerId) || [];
   const recent = times.filter(t => now - t < 1000);
+
   if (recent.length >= MAX_CLICKS_PER_SECOND) {
     return res.status(429).json({ error: 'Too fast!' });
   }
+
   times.push(now);
   clickTimes.set(playerId, times.slice(-10));
 
   try {
+    // INSERT NEW PLAYER IF NOT EXISTS
+    await pool.query(
+      'INSERT INTO players (id) VALUES ($1) ON CONFLICT (id) DO NOTHING',
+      [playerId]
+    );
+
     await pool.query(
       'INSERT INTO clicks (player_id, day) VALUES ($1, $2)',
       [playerId, currentDay]
     );
+
     res.json({ success: true });
   } catch (err) {
     console.error('Click insert error:', err);
