@@ -1,4 +1,4 @@
-// server.js — FIXED: Day counter starts at 100, decrements only on day end
+// server.js — FINAL FIX: secure: true (Render HTTPS proxy)
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -62,7 +62,7 @@ function getPlayerId(req, res) {
     playerId = uuidv4();
     res.cookie('playerId', playerId, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: true, // ← FIXED: Always secure on Render (HTTPS proxy)
       maxAge: 10 * 365 * 24 * 60 * 60 * 1000
     });
   }
@@ -90,7 +90,7 @@ app.post('/api/click', async (req, res) => {
     );
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
+    console.error('Click insert error:', err);
     res.status(500).json({ error: 'DB error' });
   }
 });
