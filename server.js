@@ -1,4 +1,4 @@
-// server.js — FIXED: Insert player before click, secure cookie
+// server.js — FINAL: Day 100 on every deploy, player insert, secure cookie
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -38,14 +38,14 @@ async function initDB() {
       );
     `);
 
-    const res = await pool.query('SELECT value FROM game_state WHERE key = $1', ['current_day']);
-    if (res.rows.length > 0) {
-      currentDay = res.rows[0].value;
-    } else {
-      await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2)', ['current_day', 100]);
-    }
+    // FORCE RESET TO DAY 100 ON EVERY DEPLOY
+    await pool.query(
+      'INSERT INTO game_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
+      ['current_day', 100]
+    );
+    currentDay = 100;
+    console.log('Day counter RESET to 100 (every deploy)');
 
-    console.log(`DB ready. Current day: ${currentDay}`);
   } catch (err) {
     console.error('DB init error:', err);
   }
@@ -80,7 +80,7 @@ app.post('/api/click', async (req, res) => {
   clickTimes.set(playerId, times.slice(-10));
 
   try {
-    // INSERT NEW PLAYER IF NOT EXISTS
+    // INSERT PLAYER IF NOT EXISTS
     await pool.query(
       'INSERT INTO players (id) VALUES ($1) ON CONFLICT (id) DO NOTHING',
       [playerId]
