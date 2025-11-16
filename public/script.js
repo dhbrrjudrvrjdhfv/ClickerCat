@@ -1,60 +1,39 @@
-// public/script.js — Universal timer, live stats, mole only on YOUR click
+// public/script.js — FINAL: Mole moves ONLY on YOUR click, live stats, no auto-jump
 const mole = document.getElementById('mole');
 const main = document.querySelector('.main');
 const stats = document.querySelectorAll('.stat');
-const yesterdayClicksValue = stats[0].querySelector('.value');
-const remainingClicksValue = stats[1].querySelector('.value');
 const todayClicksValue = stats[2].querySelector('.value');
-const timeLeftValue = stats[3].querySelector('.value');
+const remainingClicksValue = stats[1].querySelector('.value');
 const dayCounterValue = stats[4].querySelector('.value');
+const yesterdayClicksValue = stats[0].querySelector('.value');
 
 let totalSecondsLeft = 24 * 60 * 60;
 let gameLost = false;
-let lastPos = null;
+let timerRunning = true;
+let lastPosition = null;
 
-// === DEV TOOLS (CLIENT-SIDE) ===
+// === DEV TOOLS ===
 const devTools = document.getElementById('dev-tools');
 if (devTools) {
   const skipHour = document.getElementById('skip-hour');
   const skipDay = document.getElementById('skip-day');
   const resetMe = document.getElementById('reset-me');
 
-  skipHour?.addEventListener('click', () => {
-    totalSecondsLeft = Math.max(0, totalSecondsLeft - 3600);
-    updateTimerDisplay();
-    if (totalSecondsLeft <= 0) endDay();
-  });
-
-  skipDay?.addEventListener('click', () => {
-    totalSecondsLeft = 0;
-    updateTimerDisplay();
-    endDay();
-  });
-
-  resetMe?.addEventListener('click', () => {
-    document.cookie = 'playerId=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    location.reload();
-  });
+  if (skipHour) {
+    skipHour.addEventListener('click', () => skipTime(3600));
+  }
+  if (skipDay) {
+    skipDay.addEventListener('click', () => skipTime(24 * 3600));
+  }
+  if (resetMe) {
+    resetMe.addEventListener('click', () => {
+      document.cookie = 'playerId=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+      location.reload();
+    });
+  }
 }
 
-// === TIMER ===
-function updateTimerDisplay() {
-  const h = Math.floor(totalSecondsLeft / 3600);
-  const m = Math.floor((totalSecondsLeft % 3600) / 60);
-  const s = totalSecondsLeft % 60;
-  timeLeftValue.textContent = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-}
-
-function startTimer() {
-  setInterval(() => {
-    if (gameLost) return;
-    totalSecondsLeft = Math.max(0, totalSecondsLeft - 1);
-    updateTimerDisplay();
-    if (totalSecondsLeft <= 0) endDay();
-  }, 1000);
-}
-
-// === MOLE ===
+// === RANDOM POSITION (ONLY ON CLICK OR LOAD) ===
 function getRandomPosition() {
   const mainRect = main.getBoundingClientRect();
   const moleRect = mole.getBoundingClientRect();
@@ -65,82 +44,129 @@ function getRandomPosition() {
   do {
     x = Math.random() * maxX;
     y = Math.random() * maxY;
-  } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 100);
+  } while (lastPosition && Math.hypot(x - lastPosition.x, y - lastPosition.y) < 100);
 
-  lastPos = { x, y };
+  lastPosition = { x, y };
   return { x, y };
 }
 
-function moveMole() {
-  const { x, y } = getRandomPosition();
-  mole.style.left = `${x}px`;
-  mole.style.top = `${y}px`;
+// === MOVE MOLE ON YOUR CLICK ONLY ===
+function moveMoleOnClick() {
+  const pos = getRandomPosition();
+  mole.style.left = `${pos.x}px`;
+  mole.style.top = `${pos.y}px`;
 }
 
-// === CLICK ===
-mole.addEventListener('click', async e => {
+// === COUNTDOWN TIMER ===
+function updateTimerDisplay() {
+  const hours = Math.floor(totalSecondsLeft / 3600);
+  const minutes = Math.floor((totalSecondsLeft % 3600) / 60);
+  const seconds = totalSecondsLeft % 60;
+
+  const timeLeftValue = stats[3].querySelector('.value');
+  timeLeftValue.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function startTimer() {
+  if (!timerRunning || gameLost) return;
+
+  totalSecondsLeft--;
+  updateTimerDisplay();
+
+  if (totalSecondsLeft <= 0) {
+    endDay();
+    return;
+  }
+
+  setTimeout(startTimer, 1000);
+}
+
+// === SKIP TIME (DEV) ===
+function skipTime(seconds) {
+  totalSecondsLeft = Math.max(0, totalSecondsLeft - seconds);
+  updateTimerDisplay();
+  if (totalSecondsLeft <= 0) endDay();
+}
+
+// === CLICK HANDLER (YOUR CLICK ONLY) ===
+mole.addEventListener('click', async (e) => {
   e.stopPropagation();
-  if (gameLost) return;
+  if (gameLost || !timerRunning) return;
 
   console.log('Click sent');
   try {
-    const r = await fetch('/api/click', { method: 'POST' });
-    const d = await r.json();
-    if (r.ok) {
-      moveMole();
-      await syncState();
+    const res = await fetch('/api/click', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      console.log('Click status: 200');
+      moveMoleOnClick(); // MOLE MOVES ONLY FOR YOU
+      await updateState(); // Live stats update for everyone
+    } else {
+      console.log('Click failed:', data);
     }
-  } catch (err) { console.error(err); }
+  } catch (err) {
+    console.error('Click error:', err);
+  }
 });
 
-// === STATE SYNC ===
-async function syncState() {
+// === LIVE STATE UPDATE (EVERY 1 SECOND) ===
+async function updateState() {
   try {
     const res = await fetch('/api/state');
-    const st = await res.json();
+    const state = await res.json();
 
-    dayCounterValue.textContent = st.day;
-    yesterdayClicksValue.textContent = st.yesterdayClicks;
-    todayClicksValue.textContent = st.todayClicks;
-    remainingClicksValue.textContent = st.remaining;
+    dayCounterValue.textContent = state.day;
+    yesterdayClicksValue.textContent = state.yesterdayClicks;
+    todayClicksValue.textContent = state.todayClicks;
+    remainingClicksValue.textContent = state.remaining;
 
-    if (st.dayStart) {
-      const elapsed = Math.floor((Date.now() - st.dayStart) / 1000);
-      totalSecondsLeft = Math.max(0, 24 * 3600 - elapsed);
-      updateTimerDisplay();
-    }
-
-    if (st.lost) {
+    // Game over check
+    if (state.lost) {
       gameLost = true;
-      alert('Game Over!');
+      timerRunning = false;
+      alert('Game Over! Not enough clicks today.');
     }
-  } catch (e) { console.error(e); }
+  } catch (err) {
+    console.error('State fetch error:', err);
+  }
 }
+
+// Poll every 1 second for live stats
+setInterval(updateState, 1000);
 
 // === DAY END ===
 async function endDay() {
   if (gameLost) return;
+  timerRunning = false;
+  console.log('Day ending...');
+
   try {
-    const r = await fetch('/api/day-end', { method: 'POST' });
-    const d = await r.json();
-    if (d.success) {
+    const res = await fetch('/api/day-end', { method: 'POST' });
+    const data = await res.json();
+    console.log('Day end response:', data);
+
+    if (data.success) {
       totalSecondsLeft = 24 * 60 * 60;
+      timerRunning = true;
       startTimer();
-      await syncState();
-    } else if (d.lost) {
+      await updateState();
+    } else if (data.lost) {
       gameLost = true;
-      alert('Game Over!');
+      alert('Game Over! Not enough clicks.');
     }
-  } catch (err) { console.error(err); }
+  } catch (err) {
+    console.error('Day end error:', err);
+  }
 }
 
-// === INIT ===
+// === INITIALIZE ===
 (async () => {
-  const init = getRandomPosition();
-  mole.style.left = `${init.x}px`;
-  mole.style.top = `${init.y}px`;
-
-  await syncState();
+  await updateState();
+  updateTimerDisplay();
   startTimer();
-  setInterval(syncState, 1000);
+
+  // Position mole once on load
+  const initialPos = getRandomPosition();
+  mole.style.left = `${initialPos.x}px`;
+  mole.style.top = `${initialPos.y}px`;
 })();
