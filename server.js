@@ -1,4 +1,4 @@
-// server.js — FINAL: Day 100 on every deploy, player insert, secure cookie
+// server.js — FULL RESET ON EVERY DEPLOY
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -21,33 +21,33 @@ let currentDay = 100;
 
 async function initDB() {
   try {
+    // FULL WIPE
+    await pool.query('DROP TABLE IF EXISTS clicks, players, game_state CASCADE');
+
+    // RECREATE
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS players (
+      CREATE TABLE players (
         id UUID PRIMARY KEY,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-      CREATE TABLE IF NOT EXISTS clicks (
+      CREATE TABLE clicks (
         id SERIAL PRIMARY KEY,
         player_id UUID REFERENCES players(id),
         clicked_at TIMESTAMPTZ DEFAULT NOW(),
         day INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS game_state (
+      CREATE TABLE game_state (
         key TEXT PRIMARY KEY,
         value INTEGER
       );
     `);
 
-    // FORCE RESET TO DAY 100 ON EVERY DEPLOY
-    await pool.query(
-      'INSERT INTO game_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
-      ['current_day', 100]
-    );
+    await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2)', ['current_day', 100]);
     currentDay = 100;
-    console.log('Day counter RESET to 100 (every deploy)');
 
+    console.log('DB FULLY RESET — Day 100, no clicks, no players');
   } catch (err) {
-    console.error('DB init error:', err);
+    console.error('DB reset error:', err);
   }
 }
 initDB();
@@ -80,17 +80,8 @@ app.post('/api/click', async (req, res) => {
   clickTimes.set(playerId, times.slice(-10));
 
   try {
-    // INSERT PLAYER IF NOT EXISTS
-    await pool.query(
-      'INSERT INTO players (id) VALUES ($1) ON CONFLICT (id) DO NOTHING',
-      [playerId]
-    );
-
-    await pool.query(
-      'INSERT INTO clicks (player_id, day) VALUES ($1, $2)',
-      [playerId, currentDay]
-    );
-
+    await pool.query('INSERT INTO players (id) VALUES ($1) ON CONFLICT DO NOTHING', [playerId]);
+    await pool.query('INSERT INTO clicks (player_id, day) VALUES ($1, $2)', [playerId, currentDay]);
     res.json({ success: true });
   } catch (err) {
     console.error('Click insert error:', err);
@@ -137,7 +128,6 @@ app.post('/api/day-end', async (req, res) => {
     if (todayClicks >= yesterdayClicks) {
       currentDay = Math.max(0, currentDay - 1);
       await pool.query('UPDATE game_state SET value = $1 WHERE key = $2', [currentDay, 'current_day']);
-      console.log(`Day ended. New day: ${currentDay}`);
       res.json({ success: true, newDay: currentDay });
     } else {
       res.json({ lost: true });
