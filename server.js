@@ -1,4 +1,4 @@
-// server.js — FULL RESET ON EVERY DEPLOY
+// server.js — COLLECTIVE GAME: All stats global, reset only with RESET_GAME=true
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -21,33 +21,36 @@ let currentDay = 100;
 
 async function initDB() {
   try {
-    // FULL WIPE
-    await pool.query('DROP TABLE IF EXISTS clicks, players, game_state CASCADE');
-
-    // RECREATE
     await pool.query(`
-      CREATE TABLE players (
+      CREATE TABLE IF NOT EXISTS players (
         id UUID PRIMARY KEY,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
-      CREATE TABLE clicks (
+      CREATE TABLE IF NOT EXISTS clicks (
         id SERIAL PRIMARY KEY,
         player_id UUID REFERENCES players(id),
         clicked_at TIMESTAMPTZ DEFAULT NOW(),
         day INTEGER NOT NULL
       );
-      CREATE TABLE game_state (
+      CREATE TABLE IF NOT EXISTS game_state (
         key TEXT PRIMARY KEY,
         value INTEGER
       );
     `);
 
-    await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2)', ['current_day', 100]);
-    currentDay = 100;
+    if (process.env.RESET_GAME === 'true') {
+      await pool.query('DELETE FROM clicks');
+      await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2', ['current_day', 100]);
+      currentDay = 100;
+      console.log('GAME RESET: Day 100, all clicks deleted');
+    } else {
+      const res = await pool.query('SELECT value FROM game_state WHERE key = $1', ['current_day']);
+      currentDay = res.rows.length > 0 ? res.rows[0].value : 100;
+      console.log(`Game loaded. Current day: ${currentDay}`);
+    }
 
-    console.log('DB FULLY RESET — Day 100, no clicks, no players');
   } catch (err) {
-    console.error('DB reset error:', err);
+    console.error('DB init error:', err);
   }
 }
 initDB();
@@ -90,13 +93,10 @@ app.post('/api/click', async (req, res) => {
 });
 
 app.get('/api/state', async (req, res) => {
-  const playerId = req.cookies.playerId;
   try {
     const [todayRes, yesterdayRes] = await Promise.all([
-      playerId
-        ? pool.query('SELECT COUNT(*) as count FROM clicks WHERE player_id = $1 AND day = $2', [playerId, currentDay])
-        : { rows: [{ count: '0' }] },
-      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1])
+      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay]),     // GLOBAL TODAY
+      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1]) // GLOBAL YESTERDAY
     ]);
 
     const todayClicks = parseInt(todayRes.rows[0].count) || 0;
