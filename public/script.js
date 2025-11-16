@@ -1,5 +1,6 @@
-// public/script.js — FINAL: Live stats only, NO mole movement, NO fake clicks
+// public/script.js — FINAL: Mole moves ONLY on YOUR click, live stats, no auto-jump
 const mole = document.getElementById('mole');
+const main = document.querySelector('.main');
 const stats = document.querySelectorAll('.stat');
 const todayClicksValue = stats[2].querySelector('.value');
 const remainingClicksValue = stats[1].querySelector('.value');
@@ -9,6 +10,7 @@ const yesterdayClicksValue = stats[0].querySelector('.value');
 let totalSecondsLeft = 24 * 60 * 60;
 let gameLost = false;
 let timerRunning = true;
+let lastPosition = null;
 
 // === DEV TOOLS ===
 const devTools = document.getElementById('dev-tools');
@@ -17,12 +19,42 @@ if (devTools) {
   const skipDay = document.getElementById('skip-day');
   const resetMe = document.getElementById('reset-me');
 
-  if (skipHour) skipHour.addEventListener('click', () => skipTime(3600));
-  if (skipDay) skipDay.addEventListener('click', () => skipTime(24 * 3600));
-  if (resetMe) resetMe.addEventListener('click', () => {
-    document.cookie = 'playerId=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-    location.reload();
-  });
+  if (skipHour) {
+    skipHour.addEventListener('click', () => skipTime(3600));
+  }
+  if (skipDay) {
+    skipDay.addEventListener('click', () => skipTime(24 * 3600));
+  }
+  if (resetMe) {
+    resetMe.addEventListener('click', () => {
+      document.cookie = 'playerId=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+      location.reload();
+    });
+  }
+}
+
+// === RANDOM POSITION (ONLY ON CLICK OR LOAD) ===
+function getRandomPosition() {
+  const mainRect = main.getBoundingClientRect();
+  const moleRect = mole.getBoundingClientRect();
+  const maxX = mainRect.width - moleRect.width;
+  const maxY = mainRect.height - moleRect.height;
+
+  let x, y;
+  do {
+    x = Math.random() * maxX;
+    y = Math.random() * maxY;
+  } while (lastPosition && Math.hypot(x - lastPosition.x, y - lastPosition.y) < 100);
+
+  lastPosition = { x, y };
+  return { x, y };
+}
+
+// === MOVE MOLE ON YOUR CLICK ONLY ===
+function moveMoleOnClick() {
+  const pos = getRandomPosition();
+  mole.style.left = `${pos.x}px`;
+  mole.style.top = `${pos.y}px`;
 }
 
 // === COUNTDOWN TIMER ===
@@ -56,7 +88,7 @@ function skipTime(seconds) {
   if (totalSecondsLeft <= 0) endDay();
 }
 
-// === CLICK HANDLER ===
+// === CLICK HANDLER (YOUR CLICK ONLY) ===
 mole.addEventListener('click', async (e) => {
   e.stopPropagation();
   if (gameLost || !timerRunning) return;
@@ -67,7 +99,8 @@ mole.addEventListener('click', async (e) => {
     const data = await res.json();
     if (res.ok) {
       console.log('Click status: 200');
-      await updateState(); // Live update
+      moveMoleOnClick(); // MOLE MOVES ONLY FOR YOU
+      await updateState(); // Live stats update for everyone
     } else {
       console.log('Click failed:', data);
     }
@@ -87,7 +120,7 @@ async function updateState() {
     todayClicksValue.textContent = state.todayClicks;
     remainingClicksValue.textContent = state.remaining;
 
-    // Handle game over
+    // Game over check
     if (state.lost) {
       gameLost = true;
       timerRunning = false;
@@ -98,7 +131,7 @@ async function updateState() {
   }
 }
 
-// Poll state every 1 second
+// Poll every 1 second for live stats
 setInterval(updateState, 1000);
 
 // === DAY END ===
@@ -131,4 +164,9 @@ async function endDay() {
   await updateState();
   updateTimerDisplay();
   startTimer();
+
+  // Position mole once on load
+  const initialPos = getRandomPosition();
+  mole.style.left = `${initialPos.x}px`;
+  mole.style.top = `${initialPos.y}px`;
 })();
