@@ -1,4 +1,4 @@
-// server.js — COLLECTIVE GAME: All stats global, reset only with RESET_GAME=true
+// server.js — FULL: Universal timer, live stats, day_start sync
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -41,6 +41,7 @@ async function initDB() {
     if (process.env.RESET_GAME === 'true') {
       await pool.query('DELETE FROM clicks');
       await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2', ['current_day', 100]);
+      await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2', ['day_start', Date.now()]);
       currentDay = 100;
       console.log('GAME RESET: Day 100, all clicks deleted');
     } else {
@@ -48,7 +49,6 @@ async function initDB() {
       currentDay = res.rows.length > 0 ? res.rows[0].value : 100;
       console.log(`Game loaded. Current day: ${currentDay}`);
     }
-
   } catch (err) {
     console.error('DB init error:', err);
   }
@@ -94,20 +94,23 @@ app.post('/api/click', async (req, res) => {
 
 app.get('/api/state', async (req, res) => {
   try {
-    const [todayRes, yesterdayRes] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay]),     // GLOBAL TODAY
-      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1]) // GLOBAL YESTERDAY
+    const [todayRes, yesterdayRes, dayStartRes] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay]),
+      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1]),
+      pool.query(`SELECT value FROM game_state WHERE key = 'day_start'`)
     ]);
 
     const todayClicks = parseInt(todayRes.rows[0].count) || 0;
     const yesterdayClicks = parseInt(yesterdayRes.rows[0].count) || 0;
     const remaining = Math.max(0, yesterdayClicks - todayClicks);
+    const dayStart = dayStartRes.rows[0]?.value || Date.now();
 
     res.json({
       day: currentDay,
       todayClicks,
       yesterdayClicks,
-      remaining
+      remaining,
+      dayStart: Number(dayStart)
     });
   } catch (err) {
     console.error(err);
@@ -128,6 +131,7 @@ app.post('/api/day-end', async (req, res) => {
     if (todayClicks >= yesterdayClicks) {
       currentDay = Math.max(0, currentDay - 1);
       await pool.query('UPDATE game_state SET value = $1 WHERE key = $2', [currentDay, 'current_day']);
+      await pool.query('INSERT INTO game_state (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2', ['day_start', Date.now()]);
       res.json({ success: true, newDay: currentDay });
     } else {
       res.json({ lost: true });
