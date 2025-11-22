@@ -1,4 +1,3 @@
-<!-- public/index.html — FIXED: Full layout, header, mole-button, dev tools, script at bottom -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,17 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ClickerCat</title>
   <link rel="stylesheet" href="style.css" />
-  
-  <!-- DEBUG: Confirm mole exists -->
-  <script>
-    window.addEventListener('load', () => {
-      const mole = document.getElementById('mole');
-      console.log('Mole element:', mole);
-      if (!mole) {
-        console.error('ERROR: <button id="mole"> not found! Check HTML.');
-      }
-    });
-  </script>
+  <link rel="icon" href="data:,"> <!-- removes favicon 404 -->
 </head>
 <body>
   <!-- HEADER WITH STATS -->
@@ -48,13 +37,13 @@
     <button id="mole" class="mole-button">Click Me</button>
   </main>
 
-  <!-- DEV TOOLS (Fixed bottom-right) -->
-  <div id="dev-tools" style="position: fixed; bottom: 10px; right: 10px; z-index: 1000; background: #000; padding: 8px; border-radius: 6px; font-family: 'Courier New', monospace;">
-    <button id="skip-hour" style="margin: 0 4px; padding: 6px 10px; background: #ff0; color: #000; border: 2px solid #000; font-weight: bold; cursor: pointer;">+1 Hour</button>
-    <button id="skip-day" style="margin: 0 4px; padding: 6px 10px; background: #f0f; color: #fff; border: 2px solid #000; font-weight: bold; cursor: pointer;">Skip Day</button>
+  <!-- DEV TOOLS — FULLY WORKING -->
+  <div id="dev-tools" style="position: fixed; bottom: 12px; right: 12px; z-index: 9999; background: #000; padding: 12px; border-radius: 10px; font-family: 'Courier New', monospace; color: white; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
+    <button id="skip-hour" style="margin:4px; padding:10px 14px; background:#ff0; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;">+1 Hour (visual)</button><br>
+    <button id="force-next-day" style="margin:4px; padding:10px 14px; background:#0f0; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;">FORCE NEXT DAY (real)</button><br>
+    <button id="skip-10-days" style="margin:4px; padding:10px 14px; background:#f0f; color:#fff; border:none; font-weight:bold; cursor:pointer; border-radius:4px;">SKIP 10 DAYS (real)</button>
   </div>
 
-  <!-- SCRIPT AT BOTTOM -->
   <script src="script.js"></script>
 </body>
 </html>
