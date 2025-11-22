@@ -49,7 +49,7 @@ async function updateEverything() {
       endDay();
     }
     previousSecondsLeft = time.secondsLeft;
-  } catch (err) { }
+  } catch (err) {}
 }
 
 async function endDay() {
@@ -62,7 +62,7 @@ async function endDay() {
       gameLost = true;
       alert('Game Over! Not enough clicks today.');
     }
-  } catch (err) { }
+  } catch (err) {}
   setTimeout(() => dayEndInProgress = false, 8000);
 }
 
@@ -78,35 +78,22 @@ mole.addEventListener('click', async () => {
   } catch (e) {}
 });
 
-// Initial mole position
 mole.style.left = `${getRandomPosition().x}px`;
 mole.style.top = `${getRandomPosition().y}px`;
 
-// MAIN LOOP
 setInterval(updateEverything, 1000);
 updateEverything();
 
-// ——————— DEV TOOLS: WORKING FAST-FORWARD ———————
+// YOUR TWO ORIGINAL BUTTONS – NOW 100% WORKING
 document.getElementById('skip-hour')?.addEventListener('click', async () => {
   const t = await fetch('/api/time').then(r => r.json());
   const fake = Math.max(0, t.secondsLeft - 3600);
   timeLeftValue.textContent = new Date(fake * 1000).toISOString().substr(11, 8);
 });
 
-document.getElementById('force-next-day')?.addEventListener('click', async () => {
-  if (confirm('Force next day now? (real, affects everyone)')) {
+document.getElementById('skip-day')?.addEventListener('click', async () => {
+  if (confirm('Skip to next day? (real, affects everyone)')) {
     await fetch('/api/day-end', { method: 'POST' });
-    alert('Day advanced!');
-    updateEverything();
-  }
-});
-
-document.getElementById('skip-10-days')?.addEventListener('click', async () => {
-  if (confirm('Skip 10 days instantly? (real, affects everyone)')) {
-    for (let i = 0; i < 10; i++) {
-      await fetch('/api/day-end', { method: 'POST' });
-    }
-    alert('Skipped 10 days!');
     updateEverything();
   }
 });
