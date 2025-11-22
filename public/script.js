@@ -45,14 +45,11 @@ async function updateEverything() {
     const s = String(time.secondsLeft % 60).padStart(2, '0');
     timeLeftValue.textContent = `${h}:${m}:${s}`;
 
-    // Only trigger endDay on real transition 1→0
     if (previousSecondsLeft > 0 && time.secondsLeft <= 0 && !gameLost && !dayEndInProgress) {
       endDay();
     }
     previousSecondsLeft = time.secondsLeft;
-  } catch (err) {
-    // silently ignore temporary failures
-  }
+  } catch (err) { }
 }
 
 async function endDay() {
@@ -65,12 +62,8 @@ async function endDay() {
       gameLost = true;
       alert('Game Over! Not enough clicks today.');
     }
-  } catch (err) {
-    console.error('endDay failed:', err);
-  } finally {
-    // allow next day-end after 10 seconds
-    setTimeout(() => dayEndInProgress = false, 10000);
-  }
+  } catch (err) { }
+  setTimeout(() => dayEndInProgress = false, 8000);
 }
 
 mole.addEventListener('click', async () => {
@@ -85,10 +78,35 @@ mole.addEventListener('click', async () => {
   } catch (e) {}
 });
 
-// initial mole position
+// Initial mole position
 mole.style.left = `${getRandomPosition().x}px`;
 mole.style.top = `${getRandomPosition().y}px`;
 
-// main loop
+// MAIN LOOP
 setInterval(updateEverything, 1000);
 updateEverything();
+
+// ——————— DEV TOOLS: WORKING FAST-FORWARD ———————
+document.getElementById('skip-hour')?.addEventListener('click', async () => {
+  const t = await fetch('/api/time').then(r => r.json());
+  const fake = Math.max(0, t.secondsLeft - 3600);
+  timeLeftValue.textContent = new Date(fake * 1000).toISOString().substr(11, 8);
+});
+
+document.getElementById('force-next-day')?.addEventListener('click', async () => {
+  if (confirm('Force next day now? (real, affects everyone)')) {
+    await fetch('/api/day-end', { method: 'POST' });
+    alert('Day advanced!');
+    updateEverything();
+  }
+});
+
+document.getElementById('skip-10-days')?.addEventListener('click', async () => {
+  if (confirm('Skip 10 days instantly? (real, affects everyone)')) {
+    for (let i = 0; i < 10; i++) {
+      await fetch('/api/day-end', { method: 'POST' });
+    }
+    alert('Skipped 10 days!');
+    updateEverything();
+  }
+});
