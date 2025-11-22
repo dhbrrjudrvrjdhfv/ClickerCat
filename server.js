@@ -17,9 +17,9 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
+// Ensure DB is ready + safe timestamp handling
 async function ensureGameState() {
   try {
-    // Add column if missing (PostgreSQL allows this safely)
     await pool.query(`
       ALTER TABLE game_state 
       ADD COLUMN IF NOT EXISTS timestamp_value TIMESTAMPTZ;
@@ -32,23 +32,15 @@ async function ensureGameState() {
     `);
 
     if (res.rows.length === 0) {
-      // First time ever
       await pool.query(`
         INSERT INTO game_state (key, value, timestamp_value) 
         VALUES ('current_day', 100, NOW())
       `);
       currentDay = 100;
-      console.log('FIRST LAUNCH — created game_state with timestamp');
     } else {
       currentDay = res.rows[0].value || 100;
       if (!res.rows[0].timestamp_value) {
-        // Fix old row without timestamp
-        await pool.query(`
-          UPDATE game_state 
-          SET timestamp_value = NOW() 
-          WHERE key = 'current_day'
-        `);
-        console.log('FIXED — added missing timestamp to existing row');
+        await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
       }
     }
   } catch (err) {
@@ -69,7 +61,7 @@ function getPlayerId(req, res) {
   return playerId;
 }
 
-// BULLETPROOF /api/time — never crashes
+// Central time – never crashes
 app.get('/api/time', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -77,18 +69,15 @@ app.get('/api/time', async (req, res) => {
       FROM game_state 
       WHERE key = 'current_day' AND timestamp_value IS NOT NULL
     `);
-
-    let secondsLeft = 86400; // default full day
-
+    let secondsLeft = 86400;
     if (result.rows.length > 0) {
       const elapsed = Math.floor((Date.now() - new Date(result.rows[0].timestamp_value)) / 1000);
       secondsLeft = Math.max(0, 86400 - elapsed);
     }
-
     res.json({ secondsLeft });
   } catch (err) {
-    console.error('Time endpoint error:', err);
-    res.json({ secondsLeft: 86400 }); // safe fallback
+    console.error('Time error:', err);
+    res.json({ secondsLeft: 86400 });
   }
 });
 
@@ -97,9 +86,7 @@ app.post('/api/click', async (req, res) => {
   const now = new Date();
   const times = clickTimes.get(playerId) || [];
   const recent = times.filter(t => now - t < 1000);
-  if (recent.length >= MAX_CLICKS_PER_SECOND) {
-    return res.status(429).json({ error: 'Too fast!' });
-  }
+  if (recent.length >= MAX_CLICKS_PER_SECOND) return res.status(429).json({ error: 'Too fast!' });
   times.push(now);
   clickTimes.set(playerId, times.slice(-10));
 
@@ -128,6 +115,7 @@ app.get('/api/state', async (req, res) => {
   }
 });
 
+// Normal day end – respects click requirement (used by timer)
 app.post('/api/day-end', async (req, res) => {
   try {
     const [todayTotal, yesterdayTotal] = await Promise.all([
@@ -140,9 +128,7 @@ app.post('/api/day-end', async (req, res) => {
     if (todayClicks >= yesterdayClicks) {
       currentDay = Math.max(0, currentDay - 1);
       await pool.query(`
-        UPDATE game_state 
-        SET value = $1, timestamp_value = NOW() 
-        WHERE key = 'current_day'
+        UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'
       `, [currentDay]);
       res.json({ success: true, newDay: currentDay });
     } else {
@@ -154,5 +140,22 @@ app.post('/api/day-end', async (req, res) => {
   }
 });
 
+// DEV ONLY: Force next day – ignores clicks (used by Skip Day button)
+app.post('/api/force-next-day', async (req, res) => {
+  try {
+    currentDay = Math.max(0, currentDay - 1);
+    await pool.query(`
+      UPDATE game_state 
+      SET value = $1, timestamp_value = NOW() 
+      WHERE key = 'current_day'
+    `, [currentDay]);
+    console.log(`DEV FORCE: Day → ${currentDay}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Force next day error:', err);
+    res.status(500).json({ error: 'force failed' });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running — Day ${currentDay}`));
+app.listen(PORT, () => console.log(`Server running – Day ${currentDay}`));
