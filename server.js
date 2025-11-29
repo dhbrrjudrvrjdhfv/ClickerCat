@@ -8,7 +8,6 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.static('public'));
 
-// Log every request (super useful)
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
   next();
@@ -40,10 +39,9 @@ async function ensureGameState() {
 }
 ensureGameState();
 
-// Optional reset
 if (process.env.RESET_GAME === 'true') {
   (async () => {
-    console.log('RESET_GAME = true → full wipe');
+    console.log('RESET_GAME = true → full reset');
     await pool.query('DELETE FROM clicks');
     await pool.query(`INSERT INTO game_state (key, value, timestamp_value) VALUES ('current_day', 100, NOW())
                      ON CONFLICT (key) DO UPDATE SET value = 100, timestamp_value = NOW()`);
@@ -60,15 +58,16 @@ function getPlayerId(req, res) {
   return playerId;
 }
 
-// PERFECT GLOBAL TIME — every device shows the exact same timer
+// PERFECT GLOBAL TIMER — server does the math
 app.get('/api/time', async (req, res) => {
   try {
     const result = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
-    const dayStartTime = result.rows[0]?.timestamp_value || new Date();
-    res.json({ dayStart: new Date(dayStartTime).getTime() }); // Unix ms from server
+    const dayStart = result.rows[0]?.timestamp_value || new Date();
+    const serverNow = Date.now();
+    const secondsLeft = Math.max(0, 86400 - Math.floor((serverNow - new Date(dayStart)) / 1000));
+    res.json({ secondsLeft });
   } catch (err) {
-    console.error('Time error:', err);
-    res.json({ dayStart: Date.now() });
+    res.json({ secondsLeft: 86400 });
   }
 });
 
@@ -79,7 +78,8 @@ app.post('/api/click', async (req, res) => {
   if (times.filter(t => now - t < 1000).length >= MAX_CLICKS_PER_SECOND) {
     return res.status(429).json({ error: 'Too fast!' });
   }
-  times.push(now); clickTimes.set(playerId, times.slice(-10));
+  times.push(now);
+  clickTimes.set(playerId, times.slice(-10));
 
   try {
     await pool.query('INSERT INTO players (id) VALUES ($1) ON CONFLICT DO NOTHING', [playerId]);
@@ -91,6 +91,7 @@ app.post('/api/click', async (req, res) => {
   }
 });
 
+// AUTHORITATIVE STATE — everyone ends up with these numbers
 app.get('/api/state', async (req, res) => {
   try {
     const [todayRes, yesterdayRes] = await Promise.all([
@@ -100,7 +101,13 @@ app.get('/api/state', async (req, res) => {
     const todayClicks = parseInt(todayRes.rows[0].count) || 0;
     const yesterdayClicks = parseInt(yesterdayRes.rows[0].count) || 0;
     const remaining = Math.max(0, yesterdayClicks - todayClicks);
-    res.json({ day: currentDay, todayClicks, yesterdayClicks, remaining });
+
+    res.json({
+      day: currentDay,
+      todayClicks,
+      yesterdayClicks,
+      remaining
+    });
   } catch (err) {
     res.status(500).json({ error: 'State error' });
   }
@@ -120,10 +127,10 @@ app.post('/api/day-end', async (req, res) => {
     if (todayClicks >= yesterdayClicks) {
       currentDay = Math.max(0, currentDay - 1);
       await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
-      console.log(`→ PASS → Day ${currentDay}`);
+      console.log(`PASS → Day ${currentDay}`);
       res.json({ success: true });
     } else {
-      console.log(`→ FAIL → Game Over`);
+      console.log(`FAIL → Game Over`);
       res.json({ lost: true });
     }
   } catch (err) {
@@ -132,7 +139,6 @@ app.post('/api/day-end', async (req, res) => {
   }
 });
 
-// DEV: Skip Day → forces judgment in ~3 seconds
 app.post('/api/force-midnight', async (req, res) => {
   console.log('Skip Day → forcing 00:00:03');
   try {
@@ -140,7 +146,6 @@ app.post('/api/force-midnight', async (req, res) => {
     await pool.query(`UPDATE game_state SET timestamp_value = $1 WHERE key = 'current_day'`, [almost]);
     res.json({ success: true });
   } catch (err) {
-    console.error('force-midnight error:', err);
     res.status(500).json({ error: 'failed' });
   }
 });
