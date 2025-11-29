@@ -8,6 +8,12 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.static('public'));
 
+// Log every request
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
+  next();
+});
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -17,7 +23,6 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// Ensure DB tables + safe timestamp column
 async function ensureGameState() {
   try {
     await pool.query(`
@@ -49,23 +54,15 @@ async function ensureGameState() {
 }
 ensureGameState();
 
-// RESET VIA ENV VAR – works every time you set RESET_GAME=true
+// RESET VIA ENV (you already know this works)
 if (process.env.RESET_GAME === 'true') {
   (async () => {
-    console.log('RESET_GAME = true → wiping clicks and resetting to Day 100');
-    try {
-      await pool.query('DELETE FROM clicks');
-      await pool.query(`
-        INSERT INTO game_state (key, value, timestamp_value)
-        VALUES ('current_day', 100, NOW())
-        ON CONFLICT (key) DO UPDATE
-        SET value = 100, timestamp_value = NOW()
-      `);
-      currentDay = 100;
-      console.log('Reset complete – Day 100, 0 clicks, timer restarted');
-    } catch (err) {
-      console.error('Reset failed:', err);
-    }
+    console.log('RESET_GAME = true → wiping everything');
+    await pool.query('DELETE FROM clicks');
+    await pool.query(`INSERT INTO game_state (key, value, timestamp_value)
+                     VALUES ('current_day', 100, NOW())
+                     ON CONFLICT (key) DO UPDATE SET value = 100, timestamp_value = NOW()`);
+    currentDay = 100;
   })();
 }
 
@@ -73,26 +70,16 @@ function getPlayerId(req, res) {
   let playerId = req.cookies.playerId;
   if (!playerId) {
     playerId = uuidv4();
-    res.cookie('playerId', playerId, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 10 * 365 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('playerId', playerId, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 10 * 365 * 24 * 60 * 60 * 1000 });
   }
   return playerId;
 }
 
-// Central time endpoint
 app.get('/api/time', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT timestamp_value
-      FROM game_state
-      WHERE key = 'current_day' AND timestamp_value IS NOT NULL
-    `);
+    const result = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
     let secondsLeft = 86400;
-    if (result.rows.length > 0) {
+    if (result.rows[0]?.timestamp_value) {
       const elapsed = Math.floor((Date.now() - new Date(result.rows[0].timestamp_value)) / 1000);
       secondsLeft = Math.max(0, 86400 - elapsed);
     }
@@ -105,7 +92,7 @@ app.get('/api/time', async (req, res) => {
 
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
-  const now = new Date();
+  const now = Date.now();
   const times = clickTimes.get(playerId) || [];
   const recent = times.filter(t => now - t < 1000);
   if (recent.length >= MAX_CLICKS_PER_SECOND) return res.status(429).json({ error: 'Too fast!' });
@@ -115,6 +102,7 @@ app.post('/api/click', async (req, res) => {
   try {
     await pool.query('INSERT INTO players (id) VALUES ($1) ON CONFLICT DO NOTHING', [playerId]);
     await pool.query('INSERT INTO clicks (player_id, day) VALUES ($1, $2)', [playerId, currentDay]);
+    console.log(`Click registered – Day ${currentDay} – Total today: ${(await pool.query('SELECT COUNT(*) FROM clicks WHERE day=$1', [currentDay])).rows[0].count}`);
     res.json({ success: true });
   } catch (err) {
     console.error('Click error:', err);
@@ -133,11 +121,11 @@ app.get('/api/state', async (req, res) => {
     const remaining = Math.max(0, yesterdayClicks - todayClicks);
     res.json({ day: currentDay, todayClicks, yesterdayClicks, remaining });
   } catch (err) {
+    console.error('State error:', err);
     res.status(500).json({ error: 'State error' });
   }
 });
 
-// Normal day end – respects clicks (used by natural timer)
 app.post('/api/day-end', async (req, res) => {
   try {
     const [todayTotal, yesterdayTotal] = await Promise.all([
@@ -147,13 +135,15 @@ app.post('/api/day-end', async (req, res) => {
     const todayClicks = parseInt(todayTotal.rows[0].count) || 0;
     const yesterdayClicks = parseInt(yesterdayTotal.rows[0].count) || 0;
 
+    console.log(`JUDGMENT → Day ${currentDay} | Today: ${todayClicks} | Needed ≥ ${yesterdayClicks}`);
+
     if (todayClicks >= yesterdayClicks) {
       currentDay = Math.max(0, currentDay - 1);
-      await pool.query(`
-        UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'
-      `, [currentDay]);
+      await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
+      console.log(`→ PASS! New day: ${currentDay}`);
       res.json({ success: true, newDay: currentDay });
     } else {
+      console.log(`→ FAIL! Game Over.`);
       res.json({ lost: true });
     }
   } catch (err) {
@@ -162,20 +152,16 @@ app.post('/api/day-end', async (req, res) => {
   }
 });
 
-// DEV: Force next day – used by Skip Day button (ignores clicks)
-app.post('/api/force-next-day', async (req, res) => {
+// DEV: Skip Day → forces real judgment in ~3 seconds
+app.post('/api/force-midnight', async (req, res) => {
+  console.log('Skip Day pressed → forcing 00:00:03');
   try {
-    currentDay = Math.max(0, currentDay - 1);
-    await pool.query(`
-      UPDATE game_state
-      SET value = $1, timestamp_value = NOW()
-      WHERE key = 'current_day'
-    `, [currentDay]);
-    console.log(`DEV FORCE: Day → ${currentDay}`);
+    const almostMidnight = new Date(Date.now() - (86400 - 3) * 1000);
+    await pool.query(`UPDATE game_state SET timestamp_value = $1 WHERE key = 'current_day'`, [almostMidnight]);
     res.json({ success: true });
   } catch (err) {
-    console.error('Force next day error:', err);
-    res.status(500).json({ error: 'force failed' });
+    console.error('force-midnight error:', err);
+    res.status(500).json({ error: 'failed' });
   }
 });
 
