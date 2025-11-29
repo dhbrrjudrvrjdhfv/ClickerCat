@@ -1,5 +1,4 @@
 const mole = document.getElementById('mole');
-const main = document.querySelector('.main');
 const stats = document.querySelectorAll('.stat');
 const todayClicksValue = stats[2].querySelector('.value');
 const remainingClicksValue = stats[1].querySelector('.value');
@@ -11,9 +10,10 @@ let gameLost = false;
 let lastPosition = null;
 let previousSecondsLeft = 86400;
 let dayEndInProgress = false;
+let optimisticClicks = 0;
 
 function getRandomPosition() {
-  const mainRect = main.getBoundingClientRect();
+  const mainRect = document.querySelector('.main').getBoundingClientRect();
   const moleRect = mole.getBoundingClientRect();
   const maxX = mainRect.width - moleRect.width;
   const maxY = mainRect.height - moleRect.height;
@@ -32,16 +32,14 @@ async function updateEverything() {
     const state = await stateRes.json();
     const time = await timeRes.json();
 
+    // AUTHORITATIVE VALUES — everyone ends up here
     dayCounterValue.textContent = state.day;
     yesterdayClicksValue.textContent = state.yesterdayClicks;
     todayClicksValue.textContent = state.todayClicks;
     remainingClicksValue.textContent = state.remaining;
 
-    // PERFECT GLOBAL TIMER — same on every device
-    const now = Date.now();
-    const elapsed = Math.floor((now - time.dayStart) / 1000);
-    const secondsLeft = Math.max(0, 86400 - elapsed);
-
+    // PERFECT TIMER — server-calculated
+    const secondsLeft = time.secondsLeft;
     const h = String(Math.floor(secondsLeft / 3600)).padStart(2, '0');
     const m = String(Math.floor((secondsLeft % 3600) / 60)).padStart(2, '0');
     const s = String(secondsLeft % 60).padStart(2, '0');
@@ -51,6 +49,9 @@ async function updateEverything() {
       endDay();
     }
     previousSecondsLeft = secondsLeft;
+
+    // Reset optimistic counter — server is truth
+    optimisticClicks = 0;
   } catch (e) {}
 }
 
@@ -68,16 +69,20 @@ async function endDay() {
   setTimeout(() => dayEndInProgress = false, 8000);
 }
 
+// INSTANT FEEL + ALWAYS CORRECT
 mole.addEventListener('click', async () => {
   if (gameLost) return;
+
+  optimisticClicks++;
+  todayClicksValue.textContent = parseInt(todayClicksValue.textContent) + 1;
+
   try {
     const res = await fetch('/api/click', { method: 'POST' });
-    if (res.ok) {
-      const pos = getRandomPosition();
-      mole.style.left = `${pos.x}px`;
-      mole.style.top = `${pos.y}px`;
-    }
-  } catch (e) {}
+    if (!res.ok) throw new Error();
+  } catch (e) {
+    optimisticClicks--;
+    updateEverything();
+  }
 });
 
 mole.style.left = `${getRandomPosition().x}px`;
@@ -86,7 +91,6 @@ mole.style.top = `${getRandomPosition().y}px`;
 setInterval(updateEverything, 1000);
 updateEverything();
 
-// Skip Day → instant judgment in 3 seconds
 document.getElementById('skip-day')?.addEventListener('click', async () => {
   await fetch('/api/force-midnight', { method: 'POST' });
   updateEverything();
