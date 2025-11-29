@@ -37,15 +37,20 @@ async function updateEverything() {
     todayClicksValue.textContent = state.todayClicks;
     remainingClicksValue.textContent = state.remaining;
 
-    const h = String(Math.floor(time.secondsLeft / 3600)).padStart(2, '0');
-    const m = String(Math.floor((time.secondsLeft % 3600) / 60)).padStart(2, '0');
-    const s = String(time.secondsLeft % 60).padStart(2, '0');
+    // PERFECT GLOBAL TIMER — same on every device
+    const now = Date.now();
+    const elapsed = Math.floor((now - time.dayStart) / 1000);
+    const secondsLeft = Math.max(0, 86400 - elapsed);
+
+    const h = String(Math.floor(secondsLeft / 3600)).padStart(2, '0');
+    const m = String(Math.floor((secondsLeft % 3600) / 60)).padStart(2, '0');
+    const s = String(secondsLeft % 60).padStart(2, '0');
     timeLeftValue.textContent = `${h}:${m}:${s}`;
 
-    if (previousSecondsLeft > 0 && time.secondsLeft <= 0 && !gameLost && !dayEndInProgress) {
+    if (previousSecondsLeft > 0 && secondsLeft <= 0 && !gameLost && !dayEndInProgress) {
       endDay();
     }
-    previousSecondsLeft = time.secondsLeft;
+    previousSecondsLeft = secondsLeft;
   } catch (e) {}
 }
 
@@ -81,7 +86,7 @@ mole.style.top = `${getRandomPosition().y}px`;
 setInterval(updateEverything, 1000);
 updateEverything();
 
-// Skip Day = force midnight in 3 seconds (instant real judgment)
+// Skip Day → instant judgment in 3 seconds
 document.getElementById('skip-day')?.addEventListener('click', async () => {
   await fetch('/api/force-midnight', { method: 'POST' });
   updateEverything();
