@@ -8,6 +8,7 @@ const timeLeftValue = stats[3].querySelector('.value');
 
 let gameLost = false;
 let dayEndInProgress = false;
+let lastPos = null;
 
 function getRandomPosition() {
   const main = document.querySelector('.main');
@@ -15,51 +16,58 @@ function getRandomPosition() {
   const moleRect = mole.getBoundingClientRect();
   const maxX = mainRect.width - moleRect.width;
   const maxY = mainRect.height - moleRect.height;
-  let x, y, last = null;
+
+  let x, y;
   do {
     x = Math.random() * maxX;
     y = Math.random() * maxY;
-  } while (last && Math.hypot(x - last.x, y - last.y) < 100);
-  last = { x, y };
+  } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 120);
+
+  lastPos = { x, y };
   return { x, y };
 }
 
-// === LIVE SSE CONNECTION ===
+function moveMole() {
+  if (gameLost) return;
+  const pos = getRandomPosition();
+  mole.style.left = `${pos.x}px`;
+  mole.style.top = `${pos.y}px`;
+}
+
+// LIVE SSE — receives perfect data from server
 const evtSource = new EventSource('/api/live');
 
 evtSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
+  const d = JSON.parse(event.data);
 
-  dayCounterValue.textContent = data.day;
-  yesterdayClicksValue.textContent = data.yesterdayClicks;
-  todayClicksValue.textContent = data.todayClicks;
-  remainingClicksValue.textContent = data.remaining;
+  dayCounterValue.textContent = d.day;
+  yesterdayClicksValue.textContent = d.yesterdayClicks;
+  todayClicksValue.textContent = d.todayClicks;
+  remainingClicksValue.textContent = d.remaining;
 
-  const h = String(Math.floor(data.secondsLeft / 3600)).padStart(2, '0');
-  const m = String(Math.floor((data.secondsLeft % 3600) / 60)).padStart(2, '0');
-  const s = String(data.secondsLeft % 60).padStart(2, '0');
+  const h = String(Math.floor(d.secondsLeft / 3600)).padStart(2, '0');
+  const m = String(Math.floor((d.secondsLeft % 3600) / 60)).padStart(2, '0');
+  const s = String(d.secondsLeft % 60).padStart(2, '0');
   timeLeftValue.textContent = `${h}:${m}:${s}`;
 
-  if (data.secondsLeft <= 0 && !gameLost && !dayEndInProgress) {
-    endDay();
-  }
+  // Mole jumps for EVERYONE when anyone clicks
+  moveMole();
+
+  if (d.secondsLeft <= 0 && !gameLost && !dayEndInProgress) endDay();
 };
 
-evtSource.onerror = () => {
-  console.log('SSE disconnected — reconnecting...');
-};
+evtSource.onerror = () => console.log('SSE reconnecting...');
 
-// === Click handling (instant feel + server is truth) ===
+// YOUR click — instant local move + tell server
 mole.addEventListener('click', async () => {
   if (gameLost) return;
 
-  // optimistic +1
-  todayClicksValue.textContent = parseInt(todayClicksValue.textContent) + 1;
+  moveMole(); // instant feedback for you
 
   try {
     await fetch('/api/click', { method: 'POST' });
   } catch (e) {
-    // if failed, server will correct us on next broadcast
+    // server will correct everything on next broadcast anyway
   }
 });
 
@@ -77,12 +85,10 @@ async function endDay() {
   setTimeout(() => dayEndInProgress = false, 8000);
 }
 
-// Skip Day
+// Dev Skip Day
 document.getElementById('skip-day')?.addEventListener('click', () => {
   fetch('/api/force-midnight', { method: 'POST' });
 });
 
-// Initial position
-const pos = getRandomPosition();
-mole.style.left = `${pos.x}px`;
-mole.style.top = `${pos.y}px`;
+// First appearance
+moveMole();
