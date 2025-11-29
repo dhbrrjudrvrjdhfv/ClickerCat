@@ -28,9 +28,7 @@ function getRandomPosition() {
 
 async function updateEverything() {
   try {
-    const [stateRes, timeRes] = await Promise.all([
-      fetch('/api/state'), fetch('/api/time')
-    ]);
+    const [stateRes, timeRes] = await Promise.all([fetch('/api/state'), fetch('/api/time')]);
     const state = await stateRes.json();
     const time = await timeRes.json();
 
@@ -44,9 +42,8 @@ async function updateEverything() {
     const s = String(time.secondsLeft % 60).padStart(2, '0');
     timeLeftValue.textContent = `${h}:${m}:${s}`;
 
-    // Natural timer end (0:00:00) → normal rules apply
     if (previousSecondsLeft > 0 && time.secondsLeft <= 0 && !gameLost && !dayEndInProgress) {
-      endDay();  // checks clicks vs yesterday
+      endDay();
     }
     previousSecondsLeft = time.secondsLeft;
   } catch (e) {}
@@ -84,16 +81,8 @@ mole.style.top = `${getRandomPosition().y}px`;
 setInterval(updateEverything, 1000);
 updateEverything();
 
-// YOUR TWO ORIGINAL BUTTONS – FIXED
-// +1 Hour → visual only
-document.getElementById('skip-hour')?.addEventListener('click', async () => {
-  const t = await fetch('/api/time').then(r => r.json());
-  const fake = Math.max(0, t.secondsLeft - 3600);
-  timeLeftValue.textContent = new Date(fake * 1000).toISOString().substr(11, 8);
-});
-
-// Skip Day → FORCES next day instantly, no warning, no click requirement
+// Skip Day = force midnight in 3 seconds (instant real judgment)
 document.getElementById('skip-day')?.addEventListener('click', async () => {
-  await fetch('/api/force-next-day', { method: 'POST' });
+  await fetch('/api/force-midnight', { method: 'POST' });
   updateEverything();
 });
