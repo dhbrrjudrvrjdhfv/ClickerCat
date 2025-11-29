@@ -8,7 +8,6 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.static('public'));
 
-// Log requests
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
   next();
@@ -23,7 +22,6 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// === Game state setup ===
 async function ensureGameState() {
   await pool.query(`ALTER TABLE game_state ADD COLUMN IF NOT EXISTS timestamp_value TIMESTAMPTZ;`);
   const res = await pool.query(`SELECT value, timestamp_value FROM game_state WHERE key = 'current_day'`);
@@ -37,7 +35,6 @@ async function ensureGameState() {
 }
 ensureGameState();
 
-// Reset
 if (process.env.RESET_GAME === 'true') {
   (async () => {
     await pool.query('DELETE FROM clicks');
@@ -56,7 +53,7 @@ function getPlayerId(req, res) {
   return id;
 }
 
-// === LIVE SSE ENDPOINT (this is the magic) ===
+// LIVE SSE — pushes everything important instantly
 const clients = new Set();
 
 app.get('/api/live', (req, res) => {
@@ -64,13 +61,10 @@ app.get('/api/live', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
-
   clients.add(res);
-
   req.on('close', () => clients.delete(res));
 });
 
-// === Broadcast function (pushes to ALL devices instantly) ===
 async function broadcast() {
   const [todayRes, yesterdayRes, timeRes] = await Promise.all([
     pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]),
@@ -84,24 +78,12 @@ async function broadcast() {
   const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
   const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
 
-  const data = JSON.stringify({
-    day: currentDay,
-    todayClicks,
-    yesterdayClicks,
-    remaining,
-    secondsLeft
-  });
+  const data = JSON.stringify({ day: currentDay, todayClicks, yesterdayClicks, remaining, secondsLeft });
 
-  for (const client of clients) {
-    client.write(`data: ${data}\n\n`);
-  }
+  for (const client of clients) client.write(`data: ${data}\n\n`);
 }
 
-// Push updates 10 times per second
-setInterval(broadcast, 100);
-
-// === Normal endpoints ===
-app.get('/api/time', async (req, res) => res.json({ secondsLeft: 86400 })); // fallback
+setInterval(broadcast, 100); // 10× per second
 
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
@@ -116,13 +98,8 @@ app.post('/api/click', async (req, res) => {
   await pool.query('INSERT INTO players (id) VALUES ($1) ON CONFLICT DO NOTHING', [playerId]);
   await pool.query('INSERT INTO clicks (player_id, day) VALUES ($1, $2)', [playerId, currentDay]);
 
-  broadcast(); // instant update everywhere
+  broadcast();
   res.json({ success: true });
-});
-
-app.get('/api/state', async (req, res) => {
-  await broadcast(); // make sure latest data
-  res.json({ day: currentDay });
 });
 
 app.post('/api/day-end', async (req, res) => {
@@ -137,11 +114,9 @@ app.post('/api/day-end', async (req, res) => {
   if (today >= yesterday) {
     currentDay = Math.max(0, currentDay - 1);
     await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
-    console.log(`DAY END → PASS → Day ${currentDay}`);
     broadcast();
     res.json({ success: true });
   } else {
-    console.log(`DAY END → FAIL → Game Over`);
     broadcast();
     res.json({ lost: true });
   }
@@ -150,7 +125,6 @@ app.post('/api/day-end', async (req, res) => {
 app.post('/api/force-midnight', async (req, res) => {
   const almost = new Date(Date.now() - (86400 - 3) * 1000);
   await pool.query(`UPDATE game_state SET timestamp_value = $1 WHERE key = 'current_day'`, [almost]);
-  console.log('Skip Day → 00:00:03');
   broadcast();
   res.json({ success: true });
 });
