@@ -17,23 +17,23 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// Ensure DB is ready + safe timestamp handling
+// Ensure DB tables + safe timestamp column
 async function ensureGameState() {
   try {
     await pool.query(`
-      ALTER TABLE game_state 
+      ALTER TABLE game_state
       ADD COLUMN IF NOT EXISTS timestamp_value TIMESTAMPTZ;
     `);
 
     const res = await pool.query(`
-      SELECT value, timestamp_value 
-      FROM game_state 
+      SELECT value, timestamp_value
+      FROM game_state
       WHERE key = 'current_day'
     `);
 
     if (res.rows.length === 0) {
       await pool.query(`
-        INSERT INTO game_state (key, value, timestamp_value) 
+        INSERT INTO game_state (key, value, timestamp_value)
         VALUES ('current_day', 100, NOW())
       `);
       currentDay = 100;
@@ -49,24 +49,46 @@ async function ensureGameState() {
 }
 ensureGameState();
 
+// RESET VIA ENV VAR – works every time you set RESET_GAME=true
+if (process.env.RESET_GAME === 'true') {
+  (async () => {
+    console.log('RESET_GAME = true → wiping clicks and resetting to Day 100');
+    try {
+      await pool.query('DELETE FROM clicks');
+      await pool.query(`
+        INSERT INTO game_state (key, value, timestamp_value)
+        VALUES ('current_day', 100, NOW())
+        ON CONFLICT (key) DO UPDATE
+        SET value = 100, timestamp_value = NOW()
+      `);
+      currentDay = 100;
+      console.log('Reset complete – Day 100, 0 clicks, timer restarted');
+    } catch (err) {
+      console.error('Reset failed:', err);
+    }
+  })();
+}
+
 function getPlayerId(req, res) {
   let playerId = req.cookies.playerId;
   if (!playerId) {
     playerId = uuidv4();
     res.cookie('playerId', playerId, {
-      httpOnly: true, secure: true, sameSite: 'none',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
       maxAge: 10 * 365 * 24 * 60 * 60 * 1000
     });
   }
   return playerId;
 }
 
-// Central time – never crashes
+// Central time endpoint
 app.get('/api/time', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT timestamp_value 
-      FROM game_state 
+      SELECT timestamp_value
+      FROM game_state
       WHERE key = 'current_day' AND timestamp_value IS NOT NULL
     `);
     let secondsLeft = 86400;
@@ -115,7 +137,7 @@ app.get('/api/state', async (req, res) => {
   }
 });
 
-// Normal day end – respects click requirement (used by timer)
+// Normal day end – respects clicks (used by natural timer)
 app.post('/api/day-end', async (req, res) => {
   try {
     const [todayTotal, yesterdayTotal] = await Promise.all([
@@ -140,13 +162,13 @@ app.post('/api/day-end', async (req, res) => {
   }
 });
 
-// DEV ONLY: Force next day – ignores clicks (used by Skip Day button)
+// DEV: Force next day – used by Skip Day button (ignores clicks)
 app.post('/api/force-next-day', async (req, res) => {
   try {
     currentDay = Math.max(0, currentDay - 1);
     await pool.query(`
-      UPDATE game_state 
-      SET value = $1, timestamp_value = NOW() 
+      UPDATE game_state
+      SET value = $1, timestamp_value = NOW()
       WHERE key = 'current_day'
     `, [currentDay]);
     console.log(`DEV FORCE: Day → ${currentDay}`);
