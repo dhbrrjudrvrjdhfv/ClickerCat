@@ -9,6 +9,7 @@ const timeLeftValue = stats[3].querySelector('.value');
 let gameLost = false;
 let dayEndInProgress = false;
 let lastPos = null;
+let lastClickCount = 0;        // ← NEW: tracks real clicks
 
 function getRandomPosition() {
   const main = document.querySelector('.main');
@@ -22,7 +23,6 @@ function getRandomPosition() {
     x = Math.random() * maxX;
     y = Math.random() * maxY;
   } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 120);
-
   lastPos = { x, y };
   return { x, y };
 }
@@ -34,7 +34,7 @@ function moveMole() {
   mole.style.top = `${pos.y}px`;
 }
 
-// LIVE SSE — receives perfect data from server
+// LIVE SSE
 const evtSource = new EventSource('/api/live');
 
 evtSource.onmessage = (event) => {
@@ -45,43 +45,40 @@ evtSource.onmessage = (event) => {
   todayClicksValue.textContent = d.todayClicks;
   remainingClicksValue.textContent = d.remaining;
 
+  // ← ONLY move mole when the click count actually increased
+  if (d.todayClicks > lastClickCount) {
+    moveMole();
+    lastClickCount = d.todayClicks;
+  }
+
   const h = String(Math.floor(d.secondsLeft / 3600)).padStart(2, '0');
   const m = String(Math.floor((d.secondsLeft % 3600) / 60)).padStart(2, '0');
   const s = String(d.secondsLeft % 60).padStart(2, '0');
   timeLeftValue.textContent = `${h}:${m}:${s}`;
 
-  // Mole jumps for EVERYONE when anyone clicks
-  moveMole();
-
   if (d.secondsLeft <= 0 && !gameLost && !dayEndInProgress) endDay();
 };
-
-evtSource.onerror = () => console.log('SSE reconnecting...');
 
 // YOUR click — instant local move + tell server
 mole.addEventListener('click', async () => {
   if (gameLost) return;
-
-  moveMole(); // instant feedback for you
+  moveMole();                     // instant for you
+  lastClickCount++;               // prevent double-jump on your own click
 
   try {
     await fetch('/api/click', { method: 'POST' });
-  } catch (e) {
-    // server will correct everything on next broadcast anyway
-  }
+  } catch (e) {}
 });
 
 async function endDay() {
   if (gameLost || dayEndInProgress) return;
   dayEndInProgress = true;
-  try {
-    const res = await fetch('/api/day-end', { method: 'POST' });
-    const data = await res.json();
-    if (data.lost) {
-      gameLost = true;
-      alert('Game Over! Not enough clicks today.');
-    }
-  } catch (e) {}
+  const res = await fetch('/api/day-end', { method: 'POST' });
+  const data = await res.json();
+  if (data.lost) {
+    gameLost = true;
+    alert('Game Over! Not enough clicks today.');
+  }
   setTimeout(() => dayEndInProgress = false, 8000);
 }
 
@@ -92,3 +89,4 @@ document.getElementById('skip-day')?.addEventListener('click', () => {
 
 // First appearance
 moveMole();
+lastClickCount = 0;
