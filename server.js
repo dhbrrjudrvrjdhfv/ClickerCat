@@ -8,6 +8,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.static('public'));
 
+// Log requests
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
   next();
@@ -22,26 +23,23 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
+// === Game state setup ===
 async function ensureGameState() {
-  try {
-    await pool.query(`ALTER TABLE game_state ADD COLUMN IF NOT EXISTS timestamp_value TIMESTAMPTZ;`);
-    const res = await pool.query(`SELECT value, timestamp_value FROM game_state WHERE key = 'current_day'`);
-    if (res.rows.length === 0) {
-      await pool.query(`INSERT INTO game_state (key, value, timestamp_value) VALUES ('current_day', 100, NOW())`);
-      currentDay = 100;
-    } else {
-      currentDay = res.rows[0].value || 100;
-      if (!res.rows[0].timestamp_value) {
-        await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
-      }
-    }
-  } catch (err) { console.error('ensureGameState error:', err); }
+  await pool.query(`ALTER TABLE game_state ADD COLUMN IF NOT EXISTS timestamp_value TIMESTAMPTZ;`);
+  const res = await pool.query(`SELECT value, timestamp_value FROM game_state WHERE key = 'current_day'`);
+  if (res.rows.length === 0) {
+    await pool.query(`INSERT INTO game_state (key, value, timestamp_value) VALUES ('current_day', 100, NOW())`);
+    currentDay = 100;
+  } else {
+    currentDay = res.rows[0].value || 100;
+    if (!res.rows[0].timestamp_value) await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
+  }
 }
 ensureGameState();
 
+// Reset
 if (process.env.RESET_GAME === 'true') {
   (async () => {
-    console.log('RESET_GAME = true → full reset');
     await pool.query('DELETE FROM clicks');
     await pool.query(`INSERT INTO game_state (key, value, timestamp_value) VALUES ('current_day', 100, NOW())
                      ON CONFLICT (key) DO UPDATE SET value = 100, timestamp_value = NOW()`);
@@ -50,26 +48,60 @@ if (process.env.RESET_GAME === 'true') {
 }
 
 function getPlayerId(req, res) {
-  let playerId = req.cookies.playerId;
-  if (!playerId) {
-    playerId = uuidv4();
-    res.cookie('playerId', playerId, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 10 * 365 * 24 * 60 * 60 * 1000 });
+  let id = req.cookies.playerId;
+  if (!id) {
+    id = uuidv4();
+    res.cookie('playerId', id, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 10 * 365 * 24 * 60 * 60 * 1000 });
   }
-  return playerId;
+  return id;
 }
 
-// PERFECT GLOBAL TIMER — server does the math
-app.get('/api/time', async (req, res) => {
-  try {
-    const result = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
-    const dayStart = result.rows[0]?.timestamp_value || new Date();
-    const serverNow = Date.now();
-    const secondsLeft = Math.max(0, 86400 - Math.floor((serverNow - new Date(dayStart)) / 1000));
-    res.json({ secondsLeft });
-  } catch (err) {
-    res.json({ secondsLeft: 86400 });
-  }
+// === LIVE SSE ENDPOINT (this is the magic) ===
+const clients = new Set();
+
+app.get('/api/live', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  clients.add(res);
+
+  req.on('close', () => clients.delete(res));
 });
+
+// === Broadcast function (pushes to ALL devices instantly) ===
+async function broadcast() {
+  const [todayRes, yesterdayRes, timeRes] = await Promise.all([
+    pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]),
+    pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]),
+    pool.query('SELECT timestamp_value FROM game_state WHERE key = \'current_day\'')
+  ]);
+
+  const todayClicks = parseInt(todayRes.rows[0].c) || 0;
+  const yesterdayClicks = parseInt(yesterdayRes.rows[0].c) || 0;
+  const remaining = Math.max(0, yesterdayClicks - todayClicks);
+  const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
+  const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
+
+  const data = JSON.stringify({
+    day: currentDay,
+    todayClicks,
+    yesterdayClicks,
+    remaining,
+    secondsLeft
+  });
+
+  for (const client of clients) {
+    client.write(`data: ${data}\n\n`);
+  }
+}
+
+// Push updates 10 times per second
+setInterval(broadcast, 100);
+
+// === Normal endpoints ===
+app.get('/api/time', async (req, res) => res.json({ secondsLeft: 86400 })); // fallback
 
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
@@ -81,73 +113,46 @@ app.post('/api/click', async (req, res) => {
   times.push(now);
   clickTimes.set(playerId, times.slice(-10));
 
-  try {
-    await pool.query('INSERT INTO players (id) VALUES ($1) ON CONFLICT DO NOTHING', [playerId]);
-    await pool.query('INSERT INTO clicks (player_id, day) VALUES ($1, $2)', [playerId, currentDay]);
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Click error:', err);
-    res.status(500).json({ error: 'DB error' });
-  }
+  await pool.query('INSERT INTO players (id) VALUES ($1) ON CONFLICT DO NOTHING', [playerId]);
+  await pool.query('INSERT INTO clicks (player_id, day) VALUES ($1, $2)', [playerId, currentDay]);
+
+  broadcast(); // instant update everywhere
+  res.json({ success: true });
 });
 
-// AUTHORITATIVE STATE — everyone ends up with these numbers
 app.get('/api/state', async (req, res) => {
-  try {
-    const [todayRes, yesterdayRes] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay]),
-      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1])
-    ]);
-    const todayClicks = parseInt(todayRes.rows[0].count) || 0;
-    const yesterdayClicks = parseInt(yesterdayRes.rows[0].count) || 0;
-    const remaining = Math.max(0, yesterdayClicks - todayClicks);
-
-    res.json({
-      day: currentDay,
-      todayClicks,
-      yesterdayClicks,
-      remaining
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'State error' });
-  }
+  await broadcast(); // make sure latest data
+  res.json({ day: currentDay });
 });
 
 app.post('/api/day-end', async (req, res) => {
-  try {
-    const [todayTotal, yesterdayTotal] = await Promise.all([
-      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay]),
-      pool.query('SELECT COUNT(*) as count FROM clicks WHERE day = $1', [currentDay + 1])
-    ]);
-    const todayClicks = parseInt(todayTotal.rows[0].count) || 0;
-    const yesterdayClicks = parseInt(yesterdayTotal.rows[0].count) || 0;
+  const [todayRes, yesterdayRes] = await Promise.all([
+    pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]),
+    pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1])
+  ]);
 
-    console.log(`JUDGMENT → Day ${currentDay} | Today: ${todayClicks} | Need ≥ ${yesterdayClicks}`);
+  const today = parseInt(todayRes.rows[0].c) || 0;
+  const yesterday = parseInt(yesterdayRes.rows[0].c) || 0;
 
-    if (todayClicks >= yesterdayClicks) {
-      currentDay = Math.max(0, currentDay - 1);
-      await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
-      console.log(`PASS → Day ${currentDay}`);
-      res.json({ success: true });
-    } else {
-      console.log(`FAIL → Game Over`);
-      res.json({ lost: true });
-    }
-  } catch (err) {
-    console.error('Day-end error:', err);
+  if (today >= yesterday) {
+    currentDay = Math.max(0, currentDay - 1);
+    await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
+    console.log(`DAY END → PASS → Day ${currentDay}`);
+    broadcast();
+    res.json({ success: true });
+  } else {
+    console.log(`DAY END → FAIL → Game Over`);
+    broadcast();
     res.json({ lost: true });
   }
 });
 
 app.post('/api/force-midnight', async (req, res) => {
-  console.log('Skip Day → forcing 00:00:03');
-  try {
-    const almost = new Date(Date.now() - (86400 - 3) * 1000);
-    await pool.query(`UPDATE game_state SET timestamp_value = $1 WHERE key = 'current_day'`, [almost]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'failed' });
-  }
+  const almost = new Date(Date.now() - (86400 - 3) * 1000);
+  await pool.query(`UPDATE game_state SET timestamp_value = $1 WHERE key = 'current_day'`, [almost]);
+  console.log('Skip Day → 00:00:03');
+  broadcast();
+  res.json({ success: true });
 });
 
 const PORT = process.env.PORT || 3000;
