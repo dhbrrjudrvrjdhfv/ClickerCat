@@ -103,6 +103,27 @@ main {
   user-select: none;
   border: 4px solid #000;
 }
+#skipBtn {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  width: 70px;
+  height: 70px;
+  background: #00ff00;
+  color: #000;
+  font-weight: bold;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  border: 3px solid #000;
+  text-align: center;
+}
+#skipBtn:hover {
+  background: #00dd00;
+}
 
 #nicknameModal {
   position: fixed;
