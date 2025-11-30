@@ -15,11 +15,22 @@ const playerClicks = document.getElementById('playerClicks');
 
 let lastPos = null;
 let lastClickCount = 0;
-let hasNickname = localStorage.getItem('hasNickname') === 'true';
 
-if (!hasNickname) {
-  modal.classList.remove('hidden');
+async function checkNickname() {
+  try {
+    const res = await fetch('/api/check-nickname');
+    const data = await res.json();
+    if (!data.hasNickname) {
+      modal.classList.remove('hidden');
+    } else {
+      modal.classList.add('hidden');
+    }
+  } catch(e) {
+    modal.classList.remove('hidden');
+  }
 }
+
+checkNickname();
 
 submitBtn.onclick = async () => {
   const nick = nicknameInput.value.trim();
@@ -33,9 +44,11 @@ submitBtn.onclick = async () => {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({nickname: nick})
     });
-    if (res.ok) {
-      localStorage.setItem('hasNickname', 'true');
+    const data = await res.json();
+    if (data.success) {
       modal.classList.add('hidden');
+    } else {
+      alert('Error: ' + (data.error || 'Could not set nickname'));
     }
   } catch(e) {
     alert('Error setting nickname');
@@ -52,8 +65,8 @@ function randomPos() {
   const gameArea = document.getElementById('gameArea');
   const rect = gameArea.getBoundingClientRect();
   const moleRect = mole.getBoundingClientRect();
-  const maxX = rect.width - moleRect.width;
-  const maxY = rect.height - moleRect.height;
+  const maxX = rect.width - moleRect.width - 90;
+  const maxY = rect.height - moleRect.height - 90;
   let x, y;
   do {
     x = Math.floor(Math.random() * maxX);
@@ -71,42 +84,41 @@ function moveMole() {
 
 moveMole();
 
-async function updateLeaderboard() {
-  try {
-    const res = await fetch('/api/leaderboard');
-    const data = await res.json();
-    
-    leaderboardList.innerHTML = data.leaderboard.map((p, i) => 
-      '<div class="leaderboard-entry"><span>#' + (i+1) + ' ' + p.nickname + '</span><span>' + p.clicks + '</span></div>'
-    ).join('');
-
-    if (data.player) {
-      playerRank.textContent = '#' + data.player.rank;
-      playerNick.textContent = data.player.nickname;
-      playerClicks.textContent = data.player.clicks + ' Clicks Today';
-    }
-  } catch(e) {}
-}
-
-setInterval(updateLeaderboard, 2000);
-updateLeaderboard();
-
 const es = new EventSource('/api/live');
 es.onmessage = e => {
   const d = JSON.parse(e.data);
+  
   daySpan.textContent = d.day;
   yesterdaySpan.textContent = d.yesterdayClicks;
   todaySpan.textContent = d.todayClicks;
   remainingSpan.textContent = d.remaining;
+  
   const s = d.secondsLeft;
   const h = String(Math.floor(s/3600)).padStart(2,'0');
   const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
   const sec = String(s%60).padStart(2,'0');
   timeSpan.textContent = h + ':' + m + ':' + sec;
+  
+  if (d.leaderboard) {
+    leaderboardList.innerHTML = d.leaderboard.map((p, i) => 
+      '<div class="leaderboard-entry"><span>#' + (i+1) + ' ' + p.nickname + '</span><span>' + p.clicks + '</span></div>'
+    ).join('');
+  }
+  
+  if (d.player) {
+    playerRank.textContent = '#' + d.player.rank;
+    playerNick.textContent = d.player.nickname;
+    playerClicks.textContent = d.player.clicks + ' Clicks Today';
+  }
+  
   if (d.todayClicks > lastClickCount) {
     moveMole();
     lastClickCount = d.todayClicks;
   }
+};
+
+es.onerror = () => {
+  console.log('SSE connection lost, reconnecting...');
 };
 
 mole.onclick = async () => {
