@@ -1,86 +1,62 @@
 const mole = document.getElementById('mole');
-const stats = document.querySelectorAll('.stat');
-const todayClicksValue = stats[2].querySelector('.value');
-const remainingClicksValue = stats[1].querySelector('.value');
-const dayCounterValue = stats[4].querySelector('.value');
-const yesterdayClicksValue = stats[0].querySelector('.value');
-const timeLeftValue = stats[3].querySelector('.value');
+const todaySpan = document.getElementById('today');
+const remainingSpan = document.getElementById('remaining');
+const yesterdaySpan = document.getElementById('yesterday');
+const timeSpan = document.getElementById('time');
+const daySpan = document.getElementById('day');
 
-let gameLost = false;
-let dayEndInProgress = false;
 let lastPos = null;
 let lastClickCount = 0;
 
-function getRandomPosition() {
-  const main = document.querySelector('.main');
-  const mainRect = main.getBoundingClientRect();
+function randomPos() {
+  const main = document.querySelector('main');
+  const rect = main.getBoundingClientRect();
   const moleRect = mole.getBoundingClientRect();
 
-  const maxX = mainRect.width - moleRect.width;
-  const maxY = mainRect.height - moleRect.height;
+  const maxX = rect.width - moleRect.width;
+  const maxY = rect.height - moleRect.height;
 
   let x, y;
   do {
-    x = Math.random() * maxX;
-    y = Math.random() * maxY;
-  } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 120);
+    x = Math.floor(Math.random() * maxX);
+    y = Math.floor(Math.random() * maxY);
+  } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 130);
 
   lastPos = { x, y };
   return { x, y };
 }
 
 function moveMole() {
-  if (gameLost) return;
-  const pos = getRandomPosition();
-  mole.style.left = `${pos.x}px`;
-  mole.style.top = `${pos.y}px`;
+  const pos = randomPos();
+  mole.style.left = pos.x + 'px';
+  mole.style.top = pos.y + 'px';
 }
+
 moveMole();
 
-// SSE
-const evtSource = new EventSource('/api/live');
-evtSource.onmessage = (e) => {
+const es = new EventSource('/api/live');
+es.onmessage = e => {
   const d = JSON.parse(e.data);
 
-  dayCounterValue.textContent = d.day;
-  yesterdayClicksValue.textContent = d.yesterdayClicks;
-  todayClicksValue.textContent = d.todayClicks;
-  remainingClicksValue.textContent = d.remaining;
+  daySpan.textContent = d.day;
+  yesterdaySpan.textContent = d.yesterdayClicks;
+  todaySpan.textContent = d.todayClicks;
+  remainingSpan.textContent = d.remaining;
 
-  const h = String(Math.floor(d.secondsLeft / 3600)).padStart(2,'0');
-  const m = String(Math.floor((d.secondsLeft % 3600)/60)).padStart(2,'0');
-  const s = String(d.secondsLeft % 60).padStart(2,'0');
-  timeLeftValue.textContent = `${h}:${m}:${s}`;
+  const s = d.secondsLeft;
+  const h = String(Math.floor(s/3600)).padStart(2,'0');
+  const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const sec = String(s%60).padStart(2,'0');
+  timeSpan.textContent = `${h}:${m}:${sec}`;
 
   if (d.todayClicks > lastClickCount) {
     moveMole();
     lastClickCount = d.todayClicks;
   }
-
-  if (d.secondsLeft <= 0 && !gameLost && !dayEndInProgress) endDay();
 };
 
-// Click
-mole.addEventListener('click', async () => {
-  if (gameLost) return;
+mole.onclick = async () => {
   moveMole();
   lastClickCount++;
   try { await fetch('/api/click', {method:'POST'}); } catch(e) {}
-});
-
-async function endDay() {
-  if (gameLost || dayEndInProgress) return;
-  dayEndInProgress = true;
-  const res = await fetch('/api/day-end', {method:'POST'});
-  const data = await res.json();
-  if (data.lost) {
-    gameLost = true;
-    alert('Game Over! Not enough clicks today.');
-  }
-  setTimeout(() => dayEndInProgress = false, 8000);
-}
-
-// Dev skip
-document.getElementById('skip-day')?.addEventListener('click', () => {
-  fetch('/api/force-midnight', {method:'POST'});
-});
+};
