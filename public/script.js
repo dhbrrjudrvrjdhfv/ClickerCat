@@ -9,20 +9,22 @@ const timeLeftValue = stats[3].querySelector('.value');
 let gameLost = false;
 let dayEndInProgress = false;
 let lastPos = null;
-let lastClickCount = 0;        // ← NEW: tracks real clicks
+let lastClickCount = 0;
 
 function getRandomPosition() {
-  const main = document.querySelector('.main');
-  const mainRect = main.getBoundingClientRect();
+  const playArea = document.getElementById('play-area');
+  const rect = playArea.getBoundingClientRect();
   const moleRect = mole.getBoundingClientRect();
-  const maxX = mainRect.width - moleRect.width;
-  const maxY = mainRect.height - moleRect.height;
+
+  const maxX = rect.width - moleRect.width;
+  const maxY = rect.height - moleRect.height;
 
   let x, y;
   do {
     x = Math.random() * maxX;
     y = Math.random() * maxY;
   } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 120);
+
   lastPos = { x, y };
   return { x, y };
 }
@@ -33,47 +35,43 @@ function moveMole() {
   mole.style.left = `${pos.x}px`;
   mole.style.top = `${pos.y}px`;
 }
+moveMole(); // first spawn
 
 // LIVE SSE
 const evtSource = new EventSource('/api/live');
-
-evtSource.onmessage = (event) => {
-  const d = JSON.parse(event.data);
+evtSource.onmessage = (e) => {
+  const d = JSON.parse(e.data);
 
   dayCounterValue.textContent = d.day;
   yesterdayClicksValue.textContent = d.yesterdayClicks;
   todayClicksValue.textContent = d.todayClicks;
   remainingClicksValue.textContent = d.remaining;
 
-  // ← ONLY move mole when the click count actually increased
+  const h = String(Math.floor(d.secondsLeft / 3600)).padStart(2,'0');
+  const m = String(Math.floor((d.secondsLeft % 3600)/60)).padStart(2,'0');
+  const s = String(d.secondsLeft % 60).padStart(2,'0');
+  timeLeftValue.textContent = `${h}:${m}:${s}`;
+
   if (d.todayClicks > lastClickCount) {
     moveMole();
     lastClickCount = d.todayClicks;
   }
 
-  const h = String(Math.floor(d.secondsLeft / 3600)).padStart(2, '0');
-  const m = String(Math.floor((d.secondsLeft % 3600) / 60)).padStart(2, '0');
-  const s = String(d.secondsLeft % 60).padStart(2, '0');
-  timeLeftValue.textContent = `${h}:${m}:${s}`;
-
   if (d.secondsLeft <= 0 && !gameLost && !dayEndInProgress) endDay();
 };
 
-// YOUR click — instant local move + tell server
+// Click
 mole.addEventListener('click', async () => {
   if (gameLost) return;
-  moveMole();                     // instant for you
-  lastClickCount++;               // prevent double-jump on your own click
-
-  try {
-    await fetch('/api/click', { method: 'POST' });
-  } catch (e) {}
+  moveMole();
+  lastClickCount++;
+  try { await fetch('/api/click', {method:'POST'}); } catch(e) {}
 });
 
 async function endDay() {
   if (gameLost || dayEndInProgress) return;
   dayEndInProgress = true;
-  const res = await fetch('/api/day-end', { method: 'POST' });
+  const res = await fetch('/api/day-end', {method:'POST'});
   const data = await res.json();
   if (data.lost) {
     gameLost = true;
@@ -82,11 +80,7 @@ async function endDay() {
   setTimeout(() => dayEndInProgress = false, 8000);
 }
 
-// Dev Skip Day
+// Dev skip
 document.getElementById('skip-day')?.addEventListener('click', () => {
-  fetch('/api/force-midnight', { method: 'POST' });
+  fetch('/api/force-midnight', {method:'POST'});
 });
-
-// First appearance
-moveMole();
-lastClickCount = 0;
