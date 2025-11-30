@@ -12,12 +12,12 @@ let lastPos = null;
 let lastClickCount = 0;
 
 function getRandomPosition() {
-  const playArea = document.getElementById('play-area');
-  const rect = playArea.getBoundingClientRect();
+  const main = document.querySelector('.main');
+  const mainRect = main.getBoundingClientRect();
   const moleRect = mole.getBoundingClientRect();
 
-  const maxX = rect.width - moleRect.width;
-  const maxY = rect.height - moleRect.height;
+  const maxX = mainRect.width - moleRect.width;
+  const maxY = mainRect.height - moleRect.height;
 
   let x, y;
   do {
@@ -35,9 +35,9 @@ function moveMole() {
   mole.style.left = `${pos.x}px`;
   mole.style.top = `${pos.y}px`;
 }
-moveMole(); // first spawn
+moveMole();
 
-// LIVE SSE
+// SSE
 const evtSource = new EventSource('/api/live');
 evtSource.onmessage = (e) => {
   const d = JSON.parse(e.data);
