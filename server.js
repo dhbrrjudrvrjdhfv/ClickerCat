@@ -131,7 +131,7 @@ app.get('/api/leaderboard', async (req, res) => {
   try {
     const top100 = await pool.query('SELECT p.nickname, COUNT(c.id) as clicks FROM players p LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1 WHERE p.nickname IS NOT NULL GROUP BY p.id, p.nickname ORDER BY clicks DESC LIMIT 100', [currentDay]);
 
-    const playerData = await pool.query('SELECT p.nickname, COUNT(c.id) as clicks, (SELECT COUNT(DISTINCT p2.id) + 1 FROM players p2 LEFT JOIN clicks c2 ON p2.id = c2.player_id AND c2.day = $1 WHERE p2.nickname IS NOT NULL GROUP BY p2.id HAVING COUNT(c2.id) > COUNT(c.id)) as rank FROM players p LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1 WHERE p.id = $2 GROUP BY p.id, p.nickname', [currentDay, playerId]);
+    const playerData = await pool.query('WITH ranked AS (SELECT p.id, p.nickname, COUNT(c.id) as clicks, RANK() OVER (ORDER BY COUNT(c.id) DESC) as rank FROM players p LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1 WHERE p.nickname IS NOT NULL GROUP BY p.id, p.nickname) SELECT nickname, clicks, rank FROM ranked WHERE id = $2', [currentDay, playerId]);
 
     const leaderboard = top100.rows.map(r => {
       return { nickname: r.nickname, clicks: parseInt(r.clicks) };
@@ -140,9 +140,15 @@ app.get('/api/leaderboard', async (req, res) => {
     let player = null;
     if (playerData.rows[0]) {
       player = {
-        nickname: playerData.rows[0].nickname || 'Anonymous',
+        nickname: playerData.rows[0].nickname,
         clicks: parseInt(playerData.rows[0].clicks) || 0,
-        rank: parseInt(playerData.rows[0].rank) || '-'
+        rank: parseInt(playerData.rows[0].rank)
+      };
+    } else {
+      player = {
+        nickname: 'Anonymous',
+        clicks: 0,
+        rank: '-'
       };
     }
 
@@ -150,6 +156,13 @@ app.get('/api/leaderboard', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Database error' });
   }
+});
+
+app.post('/api/skip-day', async (req, res) => {
+  const skipTo = new Date(Date.now() - (86400 - 3) * 1000);
+  await pool.query('UPDATE game_state SET timestamp_value = $1 WHERE key = \'current_day\'', [skipTo]);
+  broadcast();
+  res.json({ success: true });
 });
 
 app.post('/api/day-end', async (req, res) => {
