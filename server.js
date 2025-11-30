@@ -62,14 +62,15 @@ function getPlayerId(req, res) {
   return id;
 }
 
-const clients = new Set();
+const clients = new Map();
 
 app.get('/api/live', (req, res) => {
+  const playerId = getPlayerId(req, res);
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
-  clients.add(res);
+  clients.set(res, playerId);
   req.on('close', () => clients.delete(res));
 });
 
@@ -84,14 +85,40 @@ async function broadcast() {
   const dayStart = timeRes.rows[0] ? timeRes.rows[0].timestamp_value : new Date();
   const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
 
-  const data = JSON.stringify({ day: currentDay, todayClicks: todayClicks, yesterdayClicks: yesterdayClicks, remaining: remaining, secondsLeft: secondsLeft });
+  const top100 = await pool.query('SELECT p.nickname, COUNT(c.id) as clicks FROM players p LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1 WHERE p.nickname IS NOT NULL GROUP BY p.id, p.nickname ORDER BY clicks DESC LIMIT 100', [currentDay]);
+  const leaderboard = top100.rows.map(r => ({ nickname: r.nickname, clicks: parseInt(r.clicks) }));
 
-  for (const client of clients) {
-    client.write('data: ' + data + '\n\n');
+  for (const [client, playerId] of clients.entries()) {
+    const playerData = await pool.query('WITH ranked AS (SELECT p.id, p.nickname, COUNT(c.id) as clicks, RANK() OVER (ORDER BY COUNT(c.id) DESC) as rank FROM players p LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1 WHERE p.nickname IS NOT NULL GROUP BY p.id, p.nickname) SELECT nickname, clicks, rank FROM ranked WHERE id = $2', [currentDay, playerId]);
+
+    let player = { nickname: 'Anonymous', clicks: 0, rank: '-' };
+    if (playerData.rows[0]) {
+      player = {
+        nickname: playerData.rows[0].nickname,
+        clicks: parseInt(playerData.rows[0].clicks) || 0,
+        rank: parseInt(playerData.rows[0].rank)
+      };
+    }
+
+    const data = JSON.stringify({ 
+      day: currentDay, 
+      todayClicks: todayClicks, 
+      yesterdayClicks: yesterdayClicks, 
+      remaining: remaining, 
+      secondsLeft: secondsLeft,
+      leaderboard: leaderboard,
+      player: player
+    });
+
+    try {
+      client.write('data: ' + data + '\n\n');
+    } catch (e) {
+      clients.delete(client);
+    }
   }
 }
 
-setInterval(broadcast, 100);
+setInterval(broadcast, 500);
 
 async function checkDayEnd() {
   const timeRes = await pool.query('SELECT timestamp_value FROM game_state WHERE key = \'current_day\'');
@@ -144,43 +171,25 @@ app.post('/api/set-nickname', async (req, res) => {
   }
 
   try {
-    await pool.query('UPDATE players SET nickname = $1 WHERE id = $2 AND nickname IS NULL', [nickname, playerId]);
-    res.json({ success: true });
+    const result = await pool.query('UPDATE players SET nickname = $1 WHERE id = $2 AND nickname IS NULL', [nickname, playerId]);
+    if (result.rowCount > 0) {
+      broadcast();
+      res.json({ success: true });
+    } else {
+      res.json({ success: false, error: 'Nickname already set' });
+    }
   } catch (e) {
     res.status(500).json({ error: 'Database error' });
   }
 });
 
-app.get('/api/leaderboard', async (req, res) => {
+app.get('/api/check-nickname', async (req, res) => {
   const playerId = getPlayerId(req, res);
-  
   try {
-    const top100 = await pool.query('SELECT p.nickname, COUNT(c.id) as clicks FROM players p LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1 WHERE p.nickname IS NOT NULL GROUP BY p.id, p.nickname ORDER BY clicks DESC LIMIT 100', [currentDay]);
-
-    const playerData = await pool.query('WITH ranked AS (SELECT p.id, p.nickname, COUNT(c.id) as clicks, RANK() OVER (ORDER BY COUNT(c.id) DESC) as rank FROM players p LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1 WHERE p.nickname IS NOT NULL GROUP BY p.id, p.nickname) SELECT nickname, clicks, rank FROM ranked WHERE id = $2', [currentDay, playerId]);
-
-    const leaderboard = top100.rows.map(r => {
-      return { nickname: r.nickname, clicks: parseInt(r.clicks) };
-    });
-
-    let player = null;
-    if (playerData.rows[0]) {
-      player = {
-        nickname: playerData.rows[0].nickname,
-        clicks: parseInt(playerData.rows[0].clicks) || 0,
-        rank: parseInt(playerData.rows[0].rank)
-      };
-    } else {
-      player = {
-        nickname: 'Anonymous',
-        clicks: 0,
-        rank: '-'
-      };
-    }
-
-    res.json({ leaderboard: leaderboard, player: player });
+    const result = await pool.query('SELECT nickname FROM players WHERE id = $1', [playerId]);
+    res.json({ hasNickname: result.rows.length > 0 && result.rows[0].nickname !== null });
   } catch (e) {
-    res.status(500).json({ error: 'Database error' });
+    res.json({ hasNickname: false });
   }
 });
 
