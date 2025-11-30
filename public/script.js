@@ -1,4 +1,5 @@
 const mole = document.getElementById('mole');
+const skipBtn = document.getElementById('skipBtn');
 const todaySpan = document.getElementById('today');
 const remainingSpan = document.getElementById('remaining');
 const yesterdaySpan = document.getElementById('yesterday');
@@ -41,6 +42,12 @@ submitBtn.onclick = async () => {
   }
 };
 
+skipBtn.onclick = async () => {
+  try {
+    await fetch('/api/skip-day', {method: 'POST'});
+  } catch(e) {}
+};
+
 function randomPos() {
   const gameArea = document.getElementById('gameArea');
   const rect = gameArea.getBoundingClientRect();
@@ -70,13 +77,13 @@ async function updateLeaderboard() {
     const data = await res.json();
     
     leaderboardList.innerHTML = data.leaderboard.map((p, i) => 
-      `<div class="leaderboard-entry"><span>#${i+1} ${p.nickname}</span><span>${p.clicks}</span></div>`
+      '<div class="leaderboard-entry"><span>#' + (i+1) + ' ' + p.nickname + '</span><span>' + p.clicks + '</span></div>'
     ).join('');
 
     if (data.player) {
-      playerRank.textContent = `#${data.player.rank}`;
+      playerRank.textContent = '#' + data.player.rank;
       playerNick.textContent = data.player.nickname;
-      playerClicks.textContent = `${data.player.clicks} Clicks Today`;
+      playerClicks.textContent = data.player.clicks + ' Clicks Today';
     }
   } catch(e) {}
 }
@@ -95,7 +102,7 @@ es.onmessage = e => {
   const h = String(Math.floor(s/3600)).padStart(2,'0');
   const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
   const sec = String(s%60).padStart(2,'0');
-  timeSpan.textContent = `${h}:${m}:${sec}`;
+  timeSpan.textContent = h + ':' + m + ':' + sec;
   if (d.todayClicks > lastClickCount) {
     moveMole();
     lastClickCount = d.todayClicks;
