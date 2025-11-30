@@ -1,4 +1,4 @@
-**server.js** (complete with new endpoints added):
+**server.js**
 
 ```javascript
 const express = require('express');
@@ -62,7 +62,6 @@ function getPlayerId(req, res) {
   return id;
 }
 
-// LIVE SSE — pushes everything important instantly
 const clients = new Set();
 
 app.get('/api/live', (req, res) => {
@@ -92,7 +91,7 @@ async function broadcast() {
   for (const client of clients) client.write(`data: ${data}\n\n`);
 }
 
-setInterval(broadcast, 100); // 10× per second
+setInterval(broadcast, 100);
 
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
