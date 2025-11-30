@@ -1,3 +1,6 @@
+**server.js** (complete with new endpoints added):
+
+```javascript
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
@@ -33,7 +36,13 @@ async function ensureGameState() {
     if (!res.rows[0].timestamp_value) await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
   }
 }
+
+async function ensureTables() {
+  await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS nickname VARCHAR(20) UNIQUE;`);
+}
+
 ensureGameState();
+ensureTables();
 
 if (process.env.RESET_GAME === 'true') {
   (async () => {
@@ -102,6 +111,69 @@ app.post('/api/click', async (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/set-nickname', async (req, res) => {
+  const playerId = getPlayerId(req, res);
+  const { nickname } = req.body;
+  
+  if (!nickname || nickname.length < 2 || nickname.length > 20) {
+    return res.status(400).json({ error: 'Invalid nickname' });
+  }
+
+  try {
+    await pool.query(
+      'UPDATE players SET nickname = $1 WHERE id = $2 AND nickname IS NULL',
+      [nickname, playerId]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.get('/api/leaderboard', async (req, res) => {
+  const playerId = getPlayerId(req, res);
+  
+  try {
+    const top100 = await pool.query(`
+      SELECT p.nickname, COUNT(c.id) as clicks
+      FROM players p
+      LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
+      WHERE p.nickname IS NOT NULL
+      GROUP BY p.id, p.nickname
+      ORDER BY clicks DESC
+      LIMIT 100
+    `, [currentDay]);
+
+    const playerData = await pool.query(`
+      SELECT p.nickname, COUNT(c.id) as clicks,
+        (SELECT COUNT(DISTINCT p2.id) + 1 
+         FROM players p2 
+         LEFT JOIN clicks c2 ON p2.id = c2.player_id AND c2.day = $1
+         WHERE p2.nickname IS NOT NULL
+         GROUP BY p2.id
+         HAVING COUNT(c2.id) > COUNT(c.id)) as rank
+      FROM players p
+      LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
+      WHERE p.id = $2
+      GROUP BY p.id, p.nickname
+    `, [currentDay, playerId]);
+
+    res.json({
+      leaderboard: top100.rows.map(r => ({
+        nickname: r.nickname,
+        clicks: parseInt(r.clicks)
+      })),
+      player: playerData.rows[0] ? {
+        nickname: playerData.rows[0].nickname || 'Anonymous',
+        clicks: parseInt(playerData.rows[0].clicks) || 0,
+        rank: parseInt(playerData.rows[0].rank) || '-'
+      } : null
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 app.post('/api/day-end', async (req, res) => {
   const [todayRes, yesterdayRes] = await Promise.all([
     pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]),
@@ -131,3 +203,4 @@ app.post('/api/force-midnight', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running – Day ${currentDay}`));
+```
