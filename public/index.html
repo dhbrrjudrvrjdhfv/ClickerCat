@@ -1,26 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ClickerCat</title>
-  <link rel="stylesheet" href="style.css" />
-  <link rel="icon" href="data:,">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Click or Die</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="header">
-    <div class="stat"><span class="label">Yesterday's Clicks</span><span class="value">0</span></div>
-    <div class="stat"><span class="label">Remaining</span><span class="value">0</span></div>
-    <div class="stat center"><span class="label">Today's Clicks</span><span class="value">0</span></div>
-    <div class="stat"><span class="label">Time Left</span><span class="value">24:00:00</span></div>
-    <div class="stat"><span class="label">Day</span><span class="value">100</span></div>
-  </header>
+  <div class="stats">
+    <div class="stat">Yesterday<br><span id="yesterday">0</span></div>
+    <div class="stat">Remaining<br><span id="remaining">0</span></div>
+    <div class="stat">Today<br><span id="today">0</span></div>
+    <div class="stat">Time Left<br><span id="time">24:00:00</span></div>
+    <div class="stat">Day<br><span id="day">100</span></div>
+  </div>
 
-  <main class="main">
-    <button id="mole" class="mole-button">Click Me</button>
+  <main>
+    <div id="mole">CLICK</div>
   </main>
-
-  <button id="skip-day" style="position:fixed;bottom:10px;right:10px;z-index:999;background:#000;color:#0f0;border:1px solid #0f0;padding:8px;">Skip Day (dev)</button>
 
   <script src="script.js"></script>
 </body>
