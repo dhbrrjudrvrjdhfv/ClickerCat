@@ -18,8 +18,27 @@
     <div id="gameArea">
       <div id="mole">CLICK</div>
     </div>
-    <div id="sidebar"></div>
+    <div id="sidebar">
+      <div id="leaderboard">
+        <div id="leaderboardList"></div>
+      </div>
+      <div id="playerStats">
+        <div id="playerRank">#-</div>
+        <div id="playerNick">-</div>
+        <div id="playerClicks">0 Clicks Today</div>
+      </div>
+    </div>
   </main>
+
+  <div id="nicknameModal">
+    <div id="modalContent">
+      <p>Choose your permanent Nickname!</p>
+      <p class="warning">Be respectful names or no eligibility to rewards.</p>
+      <input type="text" id="nicknameInput" maxlength="20" placeholder="Enter nickname">
+      <button id="submitNickname">Confirm</button>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>
