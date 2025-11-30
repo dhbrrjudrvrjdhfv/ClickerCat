@@ -1,5 +1,3 @@
-**server.js**
-
 ```javascript
 const express = require('express');
 const { Pool } = require('pg');
@@ -203,3 +201,4 @@ app.post('/api/force-midnight', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running – Day ${currentDay}`));
 ```
+
