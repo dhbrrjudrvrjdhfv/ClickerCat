@@ -3,22 +3,23 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Click or Die</title>
+  <title>ClickerCat</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="stats">
-    <div class="stat">Yesterday<br><span id="yesterday">0</span></div>
-    <div class="stat">Remaining<br><span id="remaining">0</span></div>
-    <div class="stat">Today<br><span id="today">0</span></div>
+    <div class="stat">Yesterday's Clicks<br><span id="yesterday">0</span></div>
+    <div class="stat">Remaining Clicks<br><span id="remaining">0</span></div>
+    <div class="stat">Today's Clicks<br><span id="today">0</span></div>
     <div class="stat">Time Left<br><span id="time">24:00:00</span></div>
     <div class="stat">Day<br><span id="day">100</span></div>
   </div>
-
   <main>
-    <div id="mole">CLICK</div>
+    <div id="gameArea">
+      <div id="mole">CLICK</div>
+    </div>
+    <div id="sidebar"></div>
   </main>
-
   <script src="script.js"></script>
 </body>
 </html>
