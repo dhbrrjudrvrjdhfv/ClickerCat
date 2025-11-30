@@ -47,6 +47,7 @@ ensureTables();
 if (process.env.RESET_GAME === 'true') {
   (async () => {
     await pool.query('DELETE FROM clicks');
+    await pool.query('DELETE FROM players');
     await pool.query('INSERT INTO game_state (key, value, timestamp_value) VALUES (\'current_day\', 100, NOW()) ON CONFLICT (key) DO UPDATE SET value = 100, timestamp_value = NOW()');
     currentDay = 100;
   })();
@@ -91,6 +92,31 @@ async function broadcast() {
 }
 
 setInterval(broadcast, 100);
+
+async function checkDayEnd() {
+  const timeRes = await pool.query('SELECT timestamp_value FROM game_state WHERE key = \'current_day\'');
+  const dayStart = timeRes.rows[0] ? timeRes.rows[0].timestamp_value : new Date();
+  const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
+  
+  if (secondsLeft <= 0) {
+    const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
+    const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
+    
+    const today = parseInt(todayRes.rows[0].c) || 0;
+    const yesterday = parseInt(yesterdayRes.rows[0].c) || 0;
+    
+    if (today >= yesterday) {
+      currentDay = Math.max(0, currentDay - 1);
+      await pool.query('UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = \'current_day\'', [currentDay]);
+      console.log('Day ended successfully - now Day ' + currentDay);
+      broadcast();
+    } else {
+      console.log('Day ended - GAME LOST');
+    }
+  }
+}
+
+setInterval(checkDayEnd, 1000);
 
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
