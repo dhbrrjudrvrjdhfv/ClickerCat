@@ -35,7 +35,7 @@ async function checkNickname() {
 }
 checkNickname();
 
-// PLAYER INFO MODAL (created dynamically)
+// PLAYER INFO MODAL (dynamic)
 const playerInfoModal = document.createElement('div');
 playerInfoModal.id = 'playerInfoModal';
 playerInfoModal.className = 'hidden';
@@ -48,7 +48,7 @@ window.showPlayerInfo = (nickname, rank, clicks) => {
   playerInfoModal.classList.remove('hidden');
 };
 
-// MOLE – moves only for the player who clicked
+// MOLE – only local move on click
 function randomPos() {
   const area = document.getElementById('gameArea');
   const maxX = area.clientWidth - 90;
@@ -81,7 +81,6 @@ es.onmessage = e => {
     playerRank.textContent = d.player.rank === '-' ? '#−' : `#${d.player.rank}`;
     playerNick.textContent = d.player.nickname;
     playerClicks.textContent = `${d.player.clicks} Clicks Today`;
-    if (d.player.clicks > myClicksToday) moveMoleForMe();
     myClicksToday = d.player.clicks;
   }
 
@@ -98,6 +97,10 @@ es.onmessage = e => {
   }
 };
 
-// CLICK & SKIP
-mole.onclick = async () => { moveMoleForMe(); await fetch('/api/click', {method:'POST'}); };
+// CLICK – move once only
+mole.onclick = async () => {
+  moveMoleForMe();
+  await fetch('/api/click', {method:'POST'});
+};
+
 skipBtn.onclick = async () => await fetch('/api/skip-day', {method:'POST'});
