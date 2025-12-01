@@ -12,6 +12,9 @@ const leaderboardList = document.getElementById('leaderboardList');
 const playerRank = document.getElementById('playerRank');
 const playerNick = document.getElementById('playerNick');
 const playerClicks = document.getElementById('playerClicks');
+const playerInfoModal = document.getElementById('playerInfoModal');
+const closePlayerInfo = document.getElementById('closePlayerInfo');
+const playerInfoData = document.getElementById('playerInfoData');
 
 let lastPos = null;
 let lastClickCount = 0;
@@ -54,6 +57,15 @@ submitBtn.onclick = async () => {
     alert('Error setting nickname');
   }
 };
+
+closePlayerInfo.onclick = () => {
+  playerInfoModal.classList.add('hidden');
+};
+
+function showPlayerInfo(nickname, rank, clicks) {
+  playerInfoData.innerHTML = '';
+  playerInfoModal.classList.remove('hidden');
+}
 
 skipBtn.onclick = async () => {
   try {
@@ -100,9 +112,17 @@ es.onmessage = e => {
   timeSpan.textContent = h + ':' + m + ':' + sec;
   
   if (d.leaderboard) {
-    leaderboardList.innerHTML = d.leaderboard.map((p, i) => 
-      '<div class="leaderboard-entry"><span>#' + (i+1) + ' ' + p.nickname + '</span><span>' + p.clicks + '</span></div>'
-    ).join('');
+    leaderboardList.innerHTML = d.leaderboard.map((p, i) => {
+      return '<div class="leaderboard-entry">' +
+        '<div class="leaderboard-entry-left">' +
+        '<span>#' + (i+1) + ' ' + p.nickname + '</span>' +
+        '</div>' +
+        '<div class="leaderboard-entry-right">' +
+        '<span>' + p.clicks + '</span>' +
+        '<button class="info-btn" onclick="showPlayerInfo(\'' + p.nickname + '\', ' + (i+1) + ', ' + p.clicks + ')">I</button>' +
+        '</div>' +
+        '</div>';
+    }).join('');
   }
   
   if (d.player) {
