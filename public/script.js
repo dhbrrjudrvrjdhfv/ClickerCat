@@ -5,55 +5,65 @@ const remainingSpan = document.getElementById('remaining');
 const yesterdaySpan = document.getElementById('yesterday');
 const timeSpan = document.getElementById('time');
 const daySpan = document.getElementById('day');
-const modal = document.getElementById('nicknameModal');
-const nicknameInput = document.getElementById('nicknameInput');
-const submitBtn = document.getElementById('submitNickname');
 const leaderboardList = document.getElementById('leaderboardList');
 const playerRank = document.getElementById('playerRank');
 const playerNick = document.getElementById('playerNick');
 const playerClicks = document.getElementById('playerClicks');
-const playerInfoModal = document.getElementById('playerInfoModal');
-const closePlayerInfo = document.getElementById('closePlayerInfo');
-const playerInfoData = document.getElementById('playerInfoData');
 
 let lastPos = null;
 let lastClickCount = 0;
+let myClicksToday = 0;
 
+// ——— NICKNAME: use native prompt (1 letter allowed) ———
 async function checkNickname() {
-  try {
-    const res = await fetch('/api/check-nickname');
-    const data = await res.json();
-    if (!data.hasNickname) modal.classList.remove('hidden');
-  } catch(e) {
-    modal.classList.remove('hidden');
+  const res = await fetch('/api/check-nickname');
+  const data = await res.json();
+  if (!data.hasNickname) {
+    let nick;
+    while (true) {
+      nick = prompt("Choose your permanent Nickname!\nBe respectful or no eligibility to rewards.")?.trim();
+      if (!nick) continue;
+      if (nick.length < 1) continue;
+      const r = await fetch('/api/set-nickname', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({nickname: nick})
+      });
+      const result = await r.json();
+      if (result.success) {
+        alert("Nickname set: " + nick);
+        break;
+      } else {
+        alert(result.error || "Try another name");
+      }
+    }
   }
 }
 checkNickname();
 
-submitBtn.onclick = async () => {
-  const nick = nicknameInput.value.trim();
-  if (nick.length < 2) return alert('Min 2 characters');
-  const res = await fetch('/api/set-nickname', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({nickname: nick})
-  });
-  const data = await res.json();
-  if (data.success) modal.classList.add('hidden');
-  else alert(data.error || 'Failed');
+// ——— PLAYER INFO MODAL (with red X) ———
+const playerInfoModal = document.createElement('div');
+playerInfoModal.id = 'playerInfoModal';
+playerInfoModal.className = 'hidden';
+playerInfoModal.innerHTML = `
+  <div id="playerInfoContent">
+    <button id="closePlayerInfo">X</button>
+    <div id="playerInfoData"></div>
+  </div>
+`;
+document.body.appendChild(playerInfoModal);
+
+document.getElementById('closePlayerInfo').onclick = () => {
+  playerInfoModal.classList.add('hidden');
 };
 
-closePlayerInfo.onclick = () => playerInfoModal.classList.add('hidden');
-
 window.showPlayerInfo = (nickname, rank, clicks) => {
-  playerInfoData.textContent = `Player: ${nickname}\nRank: #${rank}\nClicks today: ${clicks}`;
+  document.getElementById('playerInfoData').textContent = 
+    `Player: ${nickname}\nRank: #${rank}\nClicks today: ${clicks}`;
   playerInfoModal.classList.remove('hidden');
 };
 
-skipBtn.onclick = async () => {
-  await fetch('/api/skip-day', {method: 'POST'});
-};
-
+// ——— MOLE: move only for the clicker ———
 function randomPos() {
   const area = document.getElementById('gameArea');
   const maxX = area.clientWidth - 90;
@@ -67,13 +77,16 @@ function randomPos() {
   return {x, y};
 }
 
-function moveMole() {
+function moveMoleForMe() {
   const pos = randomPos();
   mole.style.left = pos.x + 'px';
   mole.style.top = pos.y + 'px';
 }
-moveMole();
 
+// initial position
+moveMoleForMe();
+
+// ——— SERVER SENT EVENTS ———
 const es = new EventSource('/api/live');
 es.onmessage = e => {
   const d = JSON.parse(e.data);
@@ -93,6 +106,7 @@ es.onmessage = e => {
     playerRank.textContent = d.player.rank === '-' ? '#−' : `#${d.player.rank}`;
     playerNick.textContent = d.player.nickname;
     playerClicks.textContent = `${d.player.clicks} Clicks Today`;
+    myClicksToday = d.player.clicks;
   }
 
   if (d.leaderboard) {
@@ -109,14 +123,18 @@ es.onmessage = e => {
     `).join('');
   }
 
-  if (d.todayClicks > lastClickCount) {
-    moveMole();
-    lastClickCount = d.todayClicks;
+  // Only move mole if MY clicks increased (prevents other players moving your mole)
+  if (d.player && d.player.clicks > myClicksToday) {
+    moveMoleForMe();
   }
 };
 
+// ——— CLICK HANDLER ———
 mole.onclick = async () => {
-  moveMole();
-  lastClickCount++;
+  moveMoleForMe();           // instantly move for this client only
   await fetch('/api/click', {method: 'POST'});
+};
+
+skipBtn.onclick = async () => {
+  await fetch('/api/skip-day', {method: 'POST'});
 };
