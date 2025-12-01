@@ -1,4 +1,3 @@
-const mole = document.getElementById('mole');
 const skipBtn = document.getElementById('skipBtn');
 const todaySpan = document.getElementById('today');
 const remainingSpan = document.getElementById('remaining');
@@ -10,10 +9,6 @@ const playerRank = document.getElementById('playerRank');
 const playerNick = document.getElementById('playerNick');
 const playerClicks = document.getElementById('playerClicks');
 
-let lastPos = null;
-let myClicksToday = 0;
-
-// NICKNAME → native browser prompt
 async function checkNickname() {
   const res = await fetch('/api/check-nickname');
   const data = await res.json();
@@ -22,11 +17,7 @@ async function checkNickname() {
     while (true) {
       nick = prompt("Choose your permanent Nickname!\nBe respectful or no eligibility to rewards.")?.trim();
       if (!nick || nick.length < 1) continue;
-      const r = await fetch('/api/set-nickname', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({nickname: nick})
-      });
+      const r = await fetch('/api/set-nickname', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nickname:nick})});
       const result = await r.json();
       if (result.success) { alert("Nickname set: " + nick); break; }
       else alert(result.error || "Try another name");
@@ -35,7 +26,6 @@ async function checkNickname() {
 }
 checkNickname();
 
-// PLAYER INFO MODAL (dynamic)
 const playerInfoModal = document.createElement('div');
 playerInfoModal.id = 'playerInfoModal';
 playerInfoModal.className = 'hidden';
@@ -48,25 +38,6 @@ window.showPlayerInfo = (nickname, rank, clicks) => {
   playerInfoModal.classList.remove('hidden');
 };
 
-// MOLE – only local move on click
-function randomPos() {
-  const area = document.getElementById('gameArea');
-  const maxX = area.clientWidth - 90;
-  const maxY = area.clientHeight - 90;
-  let x, y;
-  do { x = Math.random() * maxX; y = Math.random() * maxY; }
-  while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 150);
-  lastPos = {x, y};
-  return {x, y};
-}
-function moveMoleForMe() {
-  const pos = randomPos();
-  mole.style.left = pos.x + 'px';
-  mole.style.top = pos.y + 'px';
-}
-moveMoleForMe();
-
-// LIVE DATA
 const es = new EventSource('/api/live');
 es.onmessage = e => {
   const d = JSON.parse(e.data);
@@ -81,7 +52,6 @@ es.onmessage = e => {
     playerRank.textContent = d.player.rank === '-' ? '#−' : `#${d.player.rank}`;
     playerNick.textContent = d.player.nickname;
     playerClicks.textContent = `${d.player.clicks} Clicks Today`;
-    myClicksToday = d.player.clicks;
   }
 
   if (d.leaderboard) {
@@ -95,12 +65,6 @@ es.onmessage = e => {
       </div>
     `).join('');
   }
-};
-
-// CLICK – move once only
-mole.onclick = async () => {
-  moveMoleForMe();
-  await fetch('/api/click', {method:'POST'});
 };
 
 skipBtn.onclick = async () => await fetch('/api/skip-day', {method:'POST'});
