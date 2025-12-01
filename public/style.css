@@ -27,7 +27,18 @@ body {
 }
 
 main { flex: 1; display: flex; overflow: hidden; }
-#gameArea { flex: 0 0 75%; background: #fff; position: relative; overflow: hidden; }
+#gameArea { 
+  flex: 0 0 75%; background: #fff; position: relative; overflow: hidden; 
+}
+#gameArea::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url('cat.jpg') center/contain no-repeat;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.92;
+}
 #sidebar { flex: 0 0 25%; background: #000; border-left: 1px solid #333; display: flex; flex-direction: column; }
 
 #leaderboard { flex: 0 0 75%; overflow-y: auto; padding: 15px; border-bottom: 1px solid #333; }
@@ -75,20 +86,6 @@ main { flex: 1; display: flex; overflow: hidden; }
   z-index: 10;
 }
 #skipBtn:hover { background: #00dd00; }
-
-#bgImage {
-  position: absolute;
-  top: 0; left: 0;
-  width: 100%;
-  height: 100%;
-  background-image: url('cat.jpg');
-  background-size: contain;
-  background-position: center;
-  background-repeat: no-repeat;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.92;
-}
 
 /* Player Info Modal */
 #playerInfoModal {
