@@ -171,15 +171,21 @@ app.post('/api/set-nickname', async (req, res) => {
   }
 
   try {
-    const result = await pool.query('UPDATE players SET nickname = $1 WHERE id = $2 AND nickname IS NULL', [nickname, playerId]);
+    const result = await pool.query('UPDATE players SET nickname = $1 WHERE id = $2', [nickname, playerId]);
     if (result.rowCount > 0) {
       broadcast();
       res.json({ success: true });
     } else {
-      res.json({ success: false, error: 'Nickname already set' });
+      await pool.query('INSERT INTO players (id, nickname) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET nickname = $2', [playerId, nickname]);
+      broadcast();
+      res.json({ success: true });
     }
   } catch (e) {
-    res.status(500).json({ error: 'Database error' });
+    if (e.code === '23505') {
+      res.status(400).json({ error: 'Nickname already taken' });
+    } else {
+      res.status(500).json({ error: 'Database error' });
+    }
   }
 });
 
