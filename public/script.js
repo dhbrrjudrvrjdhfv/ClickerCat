@@ -1,3 +1,4 @@
+const mole = document.getElementById('mole');
 const skipBtn = document.getElementById('skipBtn');
 const todaySpan = document.getElementById('today');
 const remainingSpan = document.getElementById('remaining');
@@ -8,6 +9,9 @@ const leaderboardList = document.getElementById('leaderboardList');
 const playerRank = document.getElementById('playerRank');
 const playerNick = document.getElementById('playerNick');
 const playerClicks = document.getElementById('playerClicks');
+
+let gameLost = false;
+let lastPos = null;
 
 async function checkNickname() {
   const res = await fetch('/api/check-nickname');
@@ -38,15 +42,40 @@ window.showPlayerInfo = (nickname, rank, clicks) => {
   playerInfoModal.classList.remove('hidden');
 };
 
+function randomPos() {
+  const area = document.getElementById('gameArea');
+  const maxX = area.clientWidth - 90;
+  const maxY = area.clientHeight - 90;
+  let x, y;
+  do { x = Math.random() * maxX; y = Math.random() * maxY; }
+  while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 150);
+  lastPos = {x, y};
+  return {x, y};
+}
+function moveMoleForMe() {
+  const pos = randomPos();
+  mole.style.left = pos.x + 'px';
+  mole.style.top = pos.y + 'px';
+}
+moveMoleForMe();
+
 const es = new EventSource('/api/live');
 es.onmessage = e => {
   const d = JSON.parse(e.data);
+
+  // GAME OVER CHECK
+  if (!gameLost && d.remaining > 0 && d.secondsLeft <= 0) {
+    gameLost = true;
+    mole.style.display = 'none';
+    document.querySelectorAll('.stat').forEach(el => el.classList.add('game-over'));
+  }
+
   daySpan.textContent = d.day;
   yesterdaySpan.textContent = d.yesterdayClicks;
   todaySpan.textContent = d.todayClicks;
   remainingSpan.textContent = d.remaining;
-  const s = d.secondsLeft;
-  timeSpan.textContent = `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  timeSpan.textContent = d.secondsLeft <= 0 ? "00:00:00" : 
+    `${String(Math.floor(d.secondsLeft/3600)).padStart(2,'0')}:${String(Math.floor((d.secondsLeft%3600)/60)).padStart(2,'0')}:${String(d.secondsLeft%60).padStart(2,'0')}`;
 
   if (d.player) {
     playerRank.textContent = d.player.rank === '-' ? '#−' : `#${d.player.rank}`;
@@ -64,6 +93,13 @@ es.onmessage = e => {
         </div>
       </div>
     `).join('');
+  }
+};
+
+mole.onclick = async () => {
+  if (!gameLost) {
+    moveMoleForMe();
+    await fetch('/api/click', {method:'POST'});
   }
 };
 
