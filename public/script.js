@@ -23,69 +23,48 @@ async function checkNickname() {
   try {
     const res = await fetch('/api/check-nickname');
     const data = await res.json();
-    if (!data.hasNickname) {
-      modal.classList.remove('hidden');
-    } else {
-      modal.classList.add('hidden');
-    }
+    if (!data.hasNickname) modal.classList.remove('hidden');
   } catch(e) {
     modal.classList.remove('hidden');
   }
 }
-
 checkNickname();
 
 submitBtn.onclick = async () => {
   const nick = nicknameInput.value.trim();
-  if (nick.length < 2) {
-    alert('Nickname must be at least 2 characters');
-    return;
-  }
-  try {
-    const res = await fetch('/api/set-nickname', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({nickname: nick})
-    });
-    const data = await res.json();
-    if (data.success) {
-      modal.classList.add('hidden');
-    } else {
-      alert('Error: ' + (data.error || 'Could not set nickname'));
-    }
-  } catch(e) {
-    alert('Error setting nickname');
-  }
+  if (nick.length < 2) return alert('Min 2 characters');
+  const res = await fetch('/api/set-nickname', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({nickname: nick})
+  });
+  const data = await res.json();
+  if (data.success) modal.classList.add('hidden');
+  else alert(data.error || 'Failed');
 };
 
-closePlayerInfo.onclick = () => {
-  playerInfoModal.classList.add('hidden');
-};
+closePlayerInfo.onclick = () => playerInfoModal.classList.add('hidden');
 
-function showPlayerInfo(nickname, rank, clicks) {
-  playerInfoData.innerHTML = '';
+window.showPlayerInfo = (nickname, rank, clicks) => {
+  playerInfoData.textContent = `Player: ${nickname}\nRank: #${rank}\nClicks today: ${clicks}`;
   playerInfoModal.classList.remove('hidden');
-}
+};
 
 skipBtn.onclick = async () => {
-  try {
-    await fetch('/api/skip-day', {method: 'POST'});
-  } catch(e) {}
+  await fetch('/api/skip-day', {method: 'POST'});
 };
 
 function randomPos() {
-  const gameArea = document.getElementById('gameArea');
-  const rect = gameArea.getBoundingClientRect();
-  const moleRect = mole.getBoundingClientRect();
-  const maxX = rect.width - moleRect.width - 90;
-  const maxY = rect.height - moleRect.height - 90;
+  const area = document.getElementById('gameArea');
+  const maxX = area.clientWidth - 90;
+  const maxY = area.clientHeight - 90;
   let x, y;
   do {
     x = Math.floor(Math.random() * maxX);
     y = Math.floor(Math.random() * maxY);
-  } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 130);
-  lastPos = { x, y };
-  return { x, y };
+  } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 150);
+  lastPos = {x, y};
+  return {x, y};
 }
 
 function moveMole() {
@@ -93,56 +72,51 @@ function moveMole() {
   mole.style.left = pos.x + 'px';
   mole.style.top = pos.y + 'px';
 }
-
 moveMole();
 
 const es = new EventSource('/api/live');
 es.onmessage = e => {
   const d = JSON.parse(e.data);
-  
+
   daySpan.textContent = d.day;
   yesterdaySpan.textContent = d.yesterdayClicks;
   todaySpan.textContent = d.todayClicks;
   remainingSpan.textContent = d.remaining;
-  
+
   const s = d.secondsLeft;
   const h = String(Math.floor(s/3600)).padStart(2,'0');
   const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
   const sec = String(s%60).padStart(2,'0');
-  timeSpan.textContent = h + ':' + m + ':' + sec;
-  
-  if (d.leaderboard) {
-    leaderboardList.innerHTML = d.leaderboard.map((p, i) => {
-      return '<div class="leaderboard-entry">' +
-        '<div class="leaderboard-entry-left">' +
-        '<span>#' + (i+1) + ' ' + p.nickname + '</span>' +
-        '</div>' +
-        '<div class="leaderboard-entry-right">' +
-        '<span>' + p.clicks + '</span>' +
-        '<button class="info-btn" onclick="showPlayerInfo(\'' + p.nickname + '\', ' + (i+1) + ', ' + p.clicks + ')">I</button>' +
-        '</div>' +
-        '</div>';
-    }).join('');
-  }
-  
+  timeSpan.textContent = `${h}:${m}:${sec}`;
+
   if (d.player) {
-    playerRank.textContent = '#' + d.player.rank;
+    playerRank.textContent = d.player.rank === '-' ? '#−' : `#${d.player.rank}`;
     playerNick.textContent = d.player.nickname;
-    playerClicks.textContent = d.player.clicks + ' Clicks Today';
+    playerClicks.textContent = `${d.player.clicks} Clicks Today`;
   }
-  
+
+  if (d.leaderboard) {
+    leaderboardList.innerHTML = d.leaderboard.map((p, i) => `
+      <div class="leaderboard-entry">
+        <div class="leaderboard-entry-left">
+          #${i+1} ${p.nickname}
+        </div>
+        <div class="leaderboard-entry-right">
+          <span>${p.clicks}</span>
+          <button class="info-btn" onclick="showPlayerInfo('${p.nickname}', ${i+1}, ${p.clicks})">I</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
   if (d.todayClicks > lastClickCount) {
     moveMole();
     lastClickCount = d.todayClicks;
   }
 };
 
-es.onerror = () => {
-  console.log('SSE connection lost, reconnecting...');
-};
-
 mole.onclick = async () => {
   moveMole();
   lastClickCount++;
-  try { await fetch('/api/click', {method:'POST'}); } catch(e) {}
+  await fetch('/api/click', {method: 'POST'});
 };
