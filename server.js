@@ -1,7 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4 } = require('uuid';
 
 const app = express();
 app.use(express.json());
@@ -23,9 +23,7 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// ──────────────────────────────────────────────────
-// Auto-create required columns (no manual SQL needed)
-// ──────────────────────────────────────────────────
+// Auto-create all needed columns on startup (no SQL access required)
 async function ensureTables() {
   const columns = [
     "nickname VARCHAR(30) UNIQUE",
@@ -35,13 +33,10 @@ async function ensureTables() {
     "days_played INT DEFAULT 0",
     "last_click TIMESTAMPTZ"
   ];
-
   for (const def of columns) {
     try {
       await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${def}`);
-    } catch (e) {
-      // ignore if column exists with different type
-    }
+    } catch (e) { /* ignore */ }
   }
 }
 
@@ -62,7 +57,6 @@ async function ensureGameState() {
 ensureGameState();
 ensureTables();
 
-// Optional full reset
 if (process.env.RESET_GAME === 'true') {
   (async () => {
     await pool.query('DELETE FROM clicks');
@@ -105,7 +99,6 @@ async function broadcast() {
   const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
   const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
 
-  // Top 100 with extra stats
   const topRes = await pool.query(`
     SELECT p.nickname,
            p.total_clicks,
@@ -211,7 +204,6 @@ async function checkDayEnd() {
       currentDay = Math.max(0, currentDay - 1);
       await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
 
-      // Update streaks & days_played
       const todayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 1]);
       const yesterdayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 2]);
       const yesterdaySet = new Set(yesterdayActive.rows.map(r => r.player_id));
@@ -234,6 +226,7 @@ async function checkDayEnd() {
 }
 setInterval(checkDayEnd, 1000);
 
+// FIXED CLICK ROUTE — this is the only important change
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
   const now = Date.now();
@@ -249,7 +242,7 @@ app.post('/api/click', async (req, res) => {
     INSERT INTO players (id, total_clicks, last_click, first_seen)
     VALUES ($1, 1, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
-      total_clicks = players.total_clicks + 1,
+      total_clicks = COALESCE(players.total_clicks, 0) + 1,
       last_click = NOW()
   `, [playerId]);
 
@@ -283,7 +276,6 @@ app.get('/api/check-nickname', async (req, res) => {
   res.json({ hasNickname: !!(result.rows[0]?.nickname) });
 });
 
-// Admin shortcuts (keep if you want them)
 app.post('/api/skip-day', async (req, res) => {
   await pool.query('UPDATE game_state SET timestamp_value = NOW() - INTERVAL \'86397 seconds\' WHERE key = \'current_day\'');
   broadcast();
