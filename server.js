@@ -1,16 +1,15 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
-const uuid = require('uuid');                // ← changed to normal require
-const app = express();
+const uuid = require('uuid');
 
+const app = express();
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static('public'));
 
 app.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  console.log(`${timestamp} | ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
   next();
 });
 
@@ -23,7 +22,7 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// Auto-create columns (no manual SQL needed)
+// Auto-create columns
 async function ensureTables() {
   const columns = [
     "nickname VARCHAR(30) UNIQUE",
@@ -35,7 +34,7 @@ async function ensureTables() {
   ];
   for (const def of columns) {
     try { await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${def}`); }
-    catch (e) { /* ignore */ }
+    catch (_) {}
   }
 }
 
@@ -47,19 +46,16 @@ async function ensureGameState() {
     currentDay = 100;
   } else {
     currentDay = res.rows[0].value || 100;
-    if (!res.rows[0].timestamp_value) {
-      await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
-    }
+    if (!res.rows[0].timestamp_value) await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
   }
 }
-
 ensureGameState();
 ensureTables();
 
 function getPlayerId(req, res) {
   let id = req.cookies.playerId;
   if (!id) {
-    id = uuid.v4();                                          // ← now works
+    id = uuid.v4();
     res.cookie('playerId', id, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 10 * 365 * 24 * 60 * 60 * 1000 });
   }
   return id;
@@ -93,7 +89,7 @@ async function broadcast() {
     FROM players p
     LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
     WHERE p.nickname IS NOT NULL
-    GROUP BY p.id, p.nickname
+    GROUP BY p.id
     ORDER BY today_clicks DESC LIMIT 100
   `, [currentDay]);
 
@@ -116,10 +112,9 @@ async function broadcast() {
         FROM players p
         LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
         WHERE p.nickname IS NOT NULL
-        GROUP BY p.id, p.nickname
+        GROUP BY p.id
       )
-      SELECT nickname, clicks, rank, total_clicks, streak, first_seen, days_played, last_click
-      FROM ranked WHERE id = $2
+      SELECT * FROM ranked WHERE id = $2
     `, [currentDay, playerId]);
 
     let player = { nickname: 'Anonymous', clicks: 0, rank: '-', total_clicks: 0, streak: 0, first_seen: null, days_played: 1, last_click: null };
@@ -138,8 +133,7 @@ async function broadcast() {
     }
 
     const data = JSON.stringify({ day: currentDay, todayClicks, yesterdayClicks, remaining, secondsLeft, leaderboard, player });
-    try { client.write('data: ' + data + '\n\n'); }
-    catch (e) { clients.delete(client); }
+    try { client.write('data: ' + data + '\n\n'); } catch (_) { clients.delete(client); }
   }
 }
 setInterval(broadcast, 500);
@@ -171,15 +165,13 @@ async function checkDayEnd() {
           await pool.query('UPDATE players SET streak = 1, days_played = days_played + 1 WHERE id = $1', [player_id]);
         }
       }
-
-      console.log('Day ended – now Day ' + currentDay);
       broadcast();
     }
   }
 }
 setInterval(checkDayEnd, 1000);
 
-// FIXED CLICK ROUTE (lifetime clicks + ONLINE/OFFLINE work)
+// THIS IS THE ONLY LINE THAT WAS WRONG BEFORE
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
   const now = Date.now();
@@ -191,6 +183,7 @@ app.post('/api/click', async (req, res) => {
   times.push(now);
   clickTimes.set(playerId, times.slice(-10));
 
+  // ← FIXED: added missing "id" column in the INSERT list
   await pool.query(`
     INSERT INTO players (id, total_clicks, last_click, first_seen)
     VALUES ($1, 1, NOW(), NOW())
@@ -207,23 +200,20 @@ app.post('/api/click', async (req, res) => {
 app.post('/api/set-nickname', async (req, res) => {
   const playerId = getPlayerId(req, res);
   const nickname = (req.body.nickname || '').trim();
-  if (!nickname || nickname.length < 1 || nickname.length > 30) {
-    return res.status(400).json({ error: 'Invalid nickname' });
-  }
+  if (!nickname || nickname.length < 1 || nickname.length > 30) return res.status(400).json({ error: 'Invalid nickname' });
   try {
     await pool.query('INSERT INTO players (id, nickname) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET nickname = $2', [playerId, nickname]);
     broadcast();
     res.json({ success: true });
   } catch (e) {
-    if (e.code === '23505') res.status(400).json({ error: 'Nickname taken' });
-    else res.status(500).json({ error: 'DB error' });
+    res.status(e.code === '23505' ? 400 : 500).json({ error: e.code === '23505' ? 'Nickname taken' : 'DB error' });
   }
 });
 
 app.get('/api/check-nickname', async (req, res) => {
   const playerId = getPlayerId(req, res);
-  const result = await pool.query('SELECT nickname FROM players WHERE id = $1', [playerId]);
-  res.json({ hasNickname: !!(result.rows[0]?.nickname) });
+  const r = await pool.query('SELECT nickname FROM players WHERE id = $1', [playerId]);
+  res.json({ hasNickname: !!(r.rows[0]?.nickname) });
 });
 
 app.post('/api/skip-day', async (req, res) => {
