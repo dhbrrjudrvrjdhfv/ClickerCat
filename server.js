@@ -18,7 +18,6 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// FULL RESET ON EVERY DEPLOY IF ENV VAR IS SET
 if (process.env.RESET_ON_DEPLOY === 'true') {
   (async () => {
     try {
@@ -36,7 +35,7 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// Auto-create columns if missing
+// Auto-create columns
 async function ensureTables() {
   const columns = [
     "nickname VARCHAR(30) UNIQUE",
@@ -204,12 +203,21 @@ app.post('/api/click', async (req, res) => {
   times.push(now);
   clickTimes.set(playerId, times.slice(-10));
 
+  // Insert or update player with streak logic
   await pool.query(`
-    INSERT INTO players (id, total_clicks, last_click, first_seen)
-    VALUES ($1, 1, NOW(), NOW())
+    INSERT INTO players (id, total_clicks, last_click, first_seen, streak, days_played)
+    VALUES ($1, 1, NOW(), NOW(), 1, 1)
     ON CONFLICT (id) DO UPDATE SET
-      total_clicks = COALESCE(players.total_clicks, 0) + 1,
-      last_click = NOW()
+      total_clicks = COALESCE(players.total_clicks,0) + 1,
+      last_click = NOW(),
+      streak = CASE 
+                 WHEN players.days_played = 0 THEN 1
+                 ELSE players.streak
+               END,
+      days_played = CASE
+                      WHEN players.days_played = 0 THEN 1
+                      ELSE players.days_played
+                    END
   `, [playerId]);
 
   await pool.query('INSERT INTO clicks (player_id, day) VALUES ($1, $2)', [playerId, currentDay]);
