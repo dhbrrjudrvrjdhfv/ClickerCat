@@ -18,17 +18,15 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// FULL RESET ON EVERY DEPLOY IF ENV VAR IS SET
-if (process.env.RESET_ON_DEPLOY === 'true') {
+// FULL RESET ON DEPLOY (your existing env var)
+if (process.env.RESET_GAME === 'true') {
   (async () => {
     try {
       await pool.query('DELETE FROM clicks');
       await pool.query('DELETE FROM players');
       await pool.query('DELETE FROM game_state');
-      console.log('FULL RESET ON DEPLOY COMPLETED');
-    } catch (e) {
-      console.log('Reset failed (tables may not exist yet):', e.message);
-    }
+      console.log('FULL RESET ON DEPLOY (RESET_GAME)');
+    } catch (e) {}
   })();
 }
 
@@ -36,7 +34,6 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// Auto-create columns
 async function ensureTables() {
   const columns = [
     "nickname VARCHAR(30) UNIQUE",
@@ -50,6 +47,12 @@ async function ensureTables() {
     try { await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${def}`); }
     catch (_) {}
   }
+
+  // FIX ALL EXISTING/OLD ROWS — RUNS ONCE PER DEPLOY, 100% SAFE
+  await pool.query('UPDATE players SET total_clicks = COALESCE(total_clicks, 0) WHERE total_clicks IS NULL');
+  await pool.query('UPDATE players SET streak = COALESCE(streak, 0) WHERE streak IS NULL');
+  await pool.query('UPDATE players SET days_played = GREATEST(COALESCE(days_played, 0), 1)');
+  await pool.query('UPDATE players SET last_click = NOW() WHERE last_click IS NULL AND nickname IS NOT NULL');
 }
 
 async function ensureGameState() {
