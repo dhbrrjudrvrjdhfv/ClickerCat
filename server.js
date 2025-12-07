@@ -1,9 +1,9 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
-const { v4: uuidv4 } = require('uuid';
-
+const uuid = require('uuid');                // ← changed to normal require
 const app = express();
+
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static('public'));
@@ -23,7 +23,7 @@ const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
 
-// Auto-create all needed columns on startup (no SQL access required)
+// Auto-create columns (no manual SQL needed)
 async function ensureTables() {
   const columns = [
     "nickname VARCHAR(30) UNIQUE",
@@ -34,9 +34,8 @@ async function ensureTables() {
     "last_click TIMESTAMPTZ"
   ];
   for (const def of columns) {
-    try {
-      await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${def}`);
-    } catch (e) { /* ignore */ }
+    try { await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${def}`); }
+    catch (e) { /* ignore */ }
   }
 }
 
@@ -57,20 +56,10 @@ async function ensureGameState() {
 ensureGameState();
 ensureTables();
 
-if (process.env.RESET_GAME === 'true') {
-  (async () => {
-    await pool.query('DELETE FROM clicks');
-    await pool.query('DELETE FROM players');
-    await pool.query(`INSERT INTO game_state (key, value, timestamp_value) VALUES ('current_day', 100, NOW())
-                      ON CONFLICT (key) DO UPDATE SET value = 100, timestamp_value = NOW()`);
-    currentDay = 100;
-  })();
-}
-
 function getPlayerId(req, res) {
   let id = req.cookies.playerId;
   if (!id) {
-    id = uuidv4();
+    id = uuid.v4();                                          // ← now works
     res.cookie('playerId', id, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 10 * 365 * 24 * 60 * 60 * 1000 });
   }
   return id;
@@ -92,7 +81,6 @@ async function broadcast() {
   const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
   const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
   const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
-
   const todayClicks = parseInt(todayRes.rows[0].c) || 0;
   const yesterdayClicks = parseInt(yesterdayRes.rows[0].c) || 0;
   const remaining = Math.max(0, yesterdayClicks - todayClicks);
@@ -100,12 +88,7 @@ async function broadcast() {
   const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
 
   const topRes = await pool.query(`
-    SELECT p.nickname,
-           p.total_clicks,
-           p.streak,
-           p.first_seen,
-           p.days_played,
-           p.last_click,
+    SELECT p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
            COUNT(c.id) AS today_clicks
     FROM players p
     LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
@@ -127,13 +110,7 @@ async function broadcast() {
   for (const [client, playerId] of clients.entries()) {
     const playerRes = await pool.query(`
       WITH ranked AS (
-        SELECT p.id,
-               p.nickname,
-               p.total_clicks,
-               p.streak,
-               p.first_seen,
-               p.days_played,
-               p.last_click,
+        SELECT p.id, p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
                COUNT(c.id) AS clicks,
                RANK() OVER (ORDER BY COUNT(c.id) DESC) AS rank
         FROM players p
@@ -145,17 +122,7 @@ async function broadcast() {
       FROM ranked WHERE id = $2
     `, [currentDay, playerId]);
 
-    let player = {
-      nickname: 'Anonymous',
-      clicks: 0,
-      rank: '-',
-      total_clicks: 0,
-      streak: 0,
-      first_seen: null,
-      days_played: 1,
-      last_click: null
-    };
-
+    let player = { nickname: 'Anonymous', clicks: 0, rank: '-', total_clicks: 0, streak: 0, first_seen: null, days_played: 1, last_click: null };
     if (playerRes.rows[0]) {
       const p = playerRes.rows[0];
       player = {
@@ -170,21 +137,9 @@ async function broadcast() {
       };
     }
 
-    const data = JSON.stringify({
-      day: currentDay,
-      todayClicks,
-      yesterdayClicks,
-      remaining,
-      secondsLeft,
-      leaderboard,
-      player
-    });
-
-    try {
-      client.write('data: ' + data + '\n\n');
-    } catch (e) {
-      clients.delete(client);
-    }
+    const data = JSON.stringify({ day: currentDay, todayClicks, yesterdayClicks, remaining, secondsLeft, leaderboard, player });
+    try { client.write('data: ' + data + '\n\n'); }
+    catch (e) { clients.delete(client); }
   }
 }
 setInterval(broadcast, 500);
@@ -217,16 +172,14 @@ async function checkDayEnd() {
         }
       }
 
-      console.log('Day ended successfully – now Day ' + currentDay);
+      console.log('Day ended – now Day ' + currentDay);
       broadcast();
-    } else {
-      console.log('Day ended – GAME LOST');
     }
   }
 }
 setInterval(checkDayEnd, 1000);
 
-// FIXED CLICK ROUTE — this is the only important change
+// FIXED CLICK ROUTE (lifetime clicks + ONLINE/OFFLINE work)
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
   const now = Date.now();
@@ -262,11 +215,8 @@ app.post('/api/set-nickname', async (req, res) => {
     broadcast();
     res.json({ success: true });
   } catch (e) {
-    if (e.code === '23505') {
-      res.status(400).json({ error: 'Nickname already taken' });
-    } else {
-      res.status(500).json({ error: 'Database error' });
-    }
+    if (e.code === '23505') res.status(400).json({ error: 'Nickname taken' });
+    else res.status(500).json({ error: 'DB error' });
   }
 });
 
@@ -277,7 +227,7 @@ app.get('/api/check-nickname', async (req, res) => {
 });
 
 app.post('/api/skip-day', async (req, res) => {
-  await pool.query('UPDATE game_state SET timestamp_value = NOW() - INTERVAL \'86397 seconds\' WHERE key = \'current_day\'');
+  await pool.query(`UPDATE game_state SET timestamp_value = NOW() - INTERVAL '86397 seconds' WHERE key = 'current_day'`);
   broadcast();
   res.json({ success: true });
 });
