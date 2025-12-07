@@ -18,6 +18,7 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// FULL RESET ON DEPLOY IF ENV VAR IS SET
 if (process.env.RESET_ON_DEPLOY === 'true') {
   (async () => {
     try {
@@ -59,8 +60,9 @@ async function ensureGameState() {
     currentDay = 100;
   } else {
     currentDay = res.rows[0].value || 100;
-    if (!res.rows[0].timestamp_value)
+    if (!res.rows[0].timestamp_value) {
       await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
+    }
   }
 }
 
@@ -71,12 +73,7 @@ function getPlayerId(req, res) {
   let id = req.cookies.playerId;
   if (!id) {
     id = uuid.v4();
-    res.cookie('playerId', id, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 10 * 365 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('playerId', id, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 10 * 365 * 24 * 60 * 60 * 1000 });
   }
   return id;
 }
@@ -93,18 +90,22 @@ app.get('/api/live', (req, res) => {
   req.on('close', () => clients.delete(res));
 });
 
+async function getSecondsLeft() {
+  const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
+  const dayStart = timeRes.rows[0]?.timestamp_value ? new Date(timeRes.rows[0].timestamp_value) : new Date();
+  return Math.max(0, 86400 - Math.floor((Date.now() - dayStart) / 1000));
+}
+
 async function broadcast() {
   const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
   const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
-  const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
   const todayClicks = parseInt(todayRes.rows[0].c) || 0;
   const yesterdayClicks = parseInt(yesterdayRes.rows[0].c) || 0;
   const remaining = Math.max(0, yesterdayClicks - todayClicks);
-  const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
-  const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
+  const secondsLeft = await getSecondsLeft();
 
   const topRes = await pool.query(`
-    SELECT p.id, p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
+    SELECT p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
            COUNT(c.id) AS today_clicks
     FROM players p
     LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
@@ -114,7 +115,6 @@ async function broadcast() {
   `, [currentDay]);
 
   const leaderboard = topRes.rows.map(r => ({
-    id: r.id,
     nickname: r.nickname,
     clicks: parseInt(r.today_clicks) || 0,
     total_clicks: Number(r.total_clicks || 0),
@@ -159,39 +159,6 @@ async function broadcast() {
 }
 setInterval(broadcast, 500);
 
-async function checkDayEnd() {
-  const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
-  const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
-  const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
-
-  if (secondsLeft <= 0) {
-    const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
-    const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
-    const today = parseInt(todayRes.rows[0].c) || 0;
-    const yesterday = parseInt(yesterdayRes.rows[0].c) || 0;
-
-    if (today >= yesterday) {
-      currentDay = Math.max(0, currentDay - 1);
-      await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
-
-      const todayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 1]);
-      const yesterdayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 2]);
-      const yesterdaySet = new Set(yesterdayActive.rows.map(r => r.player_id));
-
-      for (const { player_id } of todayActive.rows) {
-        const wasYesterday = yesterdaySet.has(player_id);
-        if (wasYesterday) {
-          await pool.query('UPDATE players SET streak = streak + 1, days_played = days_played + 1 WHERE id = $1', [player_id]);
-        } else {
-          await pool.query('UPDATE players SET streak = 1, days_played = days_played + 1 WHERE id = $1', [player_id]);
-        }
-      }
-      broadcast();
-    }
-  }
-}
-setInterval(checkDayEnd, 1000);
-
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
   const now = Date.now();
@@ -203,21 +170,31 @@ app.post('/api/click', async (req, res) => {
   times.push(now);
   clickTimes.set(playerId, times.slice(-10));
 
-  // Insert or update player with streak logic
+  // Ensure dayStart exists
+  const dayStateRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key='current_day'`);
+  let dayStart = dayStateRes.rows[0]?.timestamp_value;
+  if (!dayStart) {
+    await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key='current_day'`);
+    dayStart = new Date();
+  } else {
+    dayStart = new Date(dayStart);
+  }
+
+  // Insert player or update
   await pool.query(`
     INSERT INTO players (id, total_clicks, last_click, first_seen, streak, days_played)
     VALUES ($1, 1, NOW(), NOW(), 1, 1)
     ON CONFLICT (id) DO UPDATE SET
-      total_clicks = COALESCE(players.total_clicks,0) + 1,
+      total_clicks = COALESCE(players.total_clicks,0)+1,
       last_click = NOW(),
-      streak = CASE 
-                 WHEN players.days_played = 0 THEN 1
-                 ELSE players.streak
-               END,
+      streak = CASE
+        WHEN players.streak = 0 THEN 1
+        ELSE players.streak
+      END,
       days_played = CASE
-                      WHEN players.days_played = 0 THEN 1
-                      ELSE players.days_played
-                    END
+        WHEN players.days_played = 0 THEN 1
+        ELSE players.days_played
+      END
   `, [playerId]);
 
   await pool.query('INSERT INTO clicks (player_id, day) VALUES ($1, $2)', [playerId, currentDay]);
@@ -245,7 +222,8 @@ app.get('/api/check-nickname', async (req, res) => {
 });
 
 app.post('/api/skip-day', async (req, res) => {
-  await pool.query(`UPDATE game_state SET timestamp_value = NOW() - INTERVAL '86397 seconds' WHERE key = 'current_day'`);
+  currentDay = Math.max(0, currentDay - 1);
+  await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
   broadcast();
   res.json({ success: true });
 });
