@@ -11,6 +11,7 @@ const playerNick = document.getElementById('playerNick');
 const playerClicks = document.getElementById('playerClicks');
 let gameLost = false;
 let lastPos = null;
+
 async function checkNickname() {
   const res = await fetch('/api/check-nickname');
   const data = await res.json();
@@ -27,16 +28,51 @@ async function checkNickname() {
   }
 }
 checkNickname();
+
 const playerInfoModal = document.createElement('div');
 playerInfoModal.id = 'playerInfoModal';
 playerInfoModal.className = 'hidden';
 playerInfoModal.innerHTML = `<div id="playerInfoContent"><button id="closePlayerInfo">X</button><div id="playerInfoData"></div></div>`;
 document.body.appendChild(playerInfoModal);
 document.getElementById('closePlayerInfo').addEventListener('click', () => playerInfoModal.classList.add('hidden'));
-window.showPlayerInfo = (nickname, rank, clicks) => {
-  document.getElementById('playerInfoData').textContent = `Player: ${nickname}\nRank: #${rank}\nClicks today: ${clicks}`;
+
+window.showPlayerInfo = (nickname, rank, todayClicks) => {
+  // Grab the latest leaderboard data from the last SSE message
+  let leaderboard = [];
+  try {
+    const lastData = es.lastEventData ? JSON.parse(es.lastEventData) : {};
+    leaderboard = lastData.leaderboard || [];
+  } catch(e) {}
+  
+  const player = leaderboard.find(p => p.nickname === nickname) || {
+    total_clicks: 0,
+    streak: 0,
+    first_seen: new Date().toISOString(),
+    days_played: 1,
+    last_click: null
+  };
+
+  const avg = player.days_played > 0 ? Math.round(player.total_clicks / player.days_played) : 0;
+  const online = player.last_click && (Date.now() - new Date(player.last_click)) < 60000;
+  const status = online ? '<span style="color:#0f0">ONLINE</span>' : '<span style="color:#f55">OFFLINE</span>';
+  const firstSeen = new Date(player.first_seen).toLocaleDateString();
+
+  document.getElementById('playerInfoData').innerHTML = `
+    <div style="font-family:'Courier New',monospace;color:#fff;line-height:1.75;font-size:17px">
+      Player:     ${nickname}<br>
+      Rank:       #${rank}<br>
+      Today:      ${todayClicks.toLocaleString()} clicks<br>
+      Lifetime:   ${player.total_clicks.toLocaleString()} clicks<br>
+      Streak:     ${player.streak} day${player.streak===1?'':'s'}<br>
+      First seen: ${firstSeen}<br>
+      Avg/day:    ${avg.toLocaleString()} clicks<br>
+      <br>
+      ${status}
+    </div>
+  `;
   playerInfoModal.classList.remove('hidden');
 };
+
 function randomPos() {
   const area = document.getElementById('gameArea');
   const maxX = area.clientWidth - 90;
@@ -53,6 +89,7 @@ function moveMoleForMe() {
   mole.style.top = pos.y + 'px';
 }
 moveMoleForMe();
+
 const es = new EventSource('/api/live');
 es.onmessage = e => {
   const d = JSON.parse(e.data);
@@ -84,6 +121,7 @@ es.onmessage = e => {
     `).join('');
   }
 };
+
 mole.onclick = async () => {
   if (!gameLost) {
     moveMoleForMe();
