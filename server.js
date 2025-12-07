@@ -78,6 +78,7 @@ function getPlayerId(req, res) {
 
 const clients = new Map();
 
+// SSE endpoint
 app.get('/api/live', (req, res) => {
   const playerId = getPlayerId(req, res);
   res.setHeader('Content-Type', 'text/event-stream');
@@ -88,100 +89,119 @@ app.get('/api/live', (req, res) => {
   req.on('close', () => clients.delete(res));
 });
 
+// Main broadcast — sends a full payload including leaderboard rows with lifetime, streak, days_played and last_click.
+// Also sends a per-client `player` object (if found) so clients that are not on leaderboard still have their data.
 async function broadcast() {
-  const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
-  const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
-  const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
-  const todayClicks = parseInt(todayRes.rows[0].c) || 0;
-  const yesterdayClicks = parseInt(yesterdayRes.rows[0].c) || 0;
-  const remaining = Math.max(0, yesterdayClicks - todayClicks);
-  const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
-  const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
+  try {
+    const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
+    const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
+    const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
+    const todayClicks = parseInt(todayRes.rows[0].c) || 0;
+    const yesterdayClicks = parseInt(yesterdayRes.rows[0].c) || 0;
+    const remaining = Math.max(0, yesterdayClicks - todayClicks);
+    const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
+    const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
 
-  const topRes = await pool.query(`
-    SELECT p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
-           COUNT(c.id) AS today_clicks
-    FROM players p
-    LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
-    WHERE p.nickname IS NOT NULL
-    GROUP BY p.id
-    ORDER BY today_clicks DESC LIMIT 100
-  `, [currentDay]);
+    // Leaderboard with full columns
+    const topRes = await pool.query(`
+      SELECT p.id, p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
+             COUNT(c.id) AS today_clicks
+      FROM players p
+      LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
+      WHERE p.nickname IS NOT NULL
+      GROUP BY p.id
+      ORDER BY today_clicks DESC LIMIT 100
+    `, [currentDay]);
 
-  const leaderboard = topRes.rows.map(r => ({
-    nickname: r.nickname,
-    clicks: parseInt(r.today_clicks) || 0,
-    total_clicks: Number(r.total_clicks || 0),
-    streak: Number(r.streak || 0),
-    first_seen: r.first_seen,
-    days_played: Number(r.days_played || 1),
-    last_click: r.last_click
-  }));
+    const leaderboard = topRes.rows.map(r => ({
+      id: r.id,
+      nickname: r.nickname,
+      clicks: parseInt(r.today_clicks) || 0,
+      total_clicks: Number(r.total_clicks || 0),
+      streak: Number(r.streak || 0),
+      first_seen: r.first_seen,
+      days_played: Number(r.days_played || 1),
+      last_click: r.last_click
+    }));
 
-  for (const [client, playerId] of clients.entries()) {
-    const playerRes = await pool.query(`
-      WITH ranked AS (
-        SELECT p.id, p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
-               COUNT(c.id) AS clicks,
-               RANK() OVER (ORDER BY COUNT(c.id) DESC) AS rank
-        FROM players p
-        LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
-        WHERE p.nickname IS NOT NULL
-        GROUP BY p.id
-      )
-      SELECT * FROM ranked WHERE id = $2
-    `, [currentDay, playerId]);
+    // For each connected client send payload including the per-client player snapshot
+    for (const [client, playerId] of clients.entries()) {
+      // get player snapshot (can be null)
+      const playerRes = await pool.query(`
+        WITH ranked AS (
+          SELECT p.id, p.nickname, p.total_clicks, p.streak, p.first_seen, p.days_played, p.last_click,
+                 COUNT(c.id) AS clicks,
+                 RANK() OVER (ORDER BY COUNT(c.id) DESC) AS rank
+          FROM players p
+          LEFT JOIN clicks c ON p.id = c.player_id AND c.day = $1
+          WHERE p.nickname IS NOT NULL
+          GROUP BY p.id
+        )
+        SELECT * FROM ranked WHERE id = $2
+      `, [currentDay, playerId]);
 
-    let player = { nickname: 'Anonymous', clicks: 0, rank: '-', total_clicks: 0, streak: 0, first_seen: null, days_played: 1, last_click: null };
-    if (playerRes.rows[0]) {
-      const p = playerRes.rows[0];
-      player = {
-        nickname: p.nickname,
-        clicks: parseInt(p.clicks) || 0,
-        rank: p.rank,
-        total_clicks: Number(p.total_clicks || 0),
-        streak: Number(p.streak || 0),
-        first_seen: p.first_seen,
-        days_played: Number(p.days_played || 1),
-        last_click: p.last_click
-      };
+      let player = { nickname: 'Anonymous', clicks: 0, rank: '-', total_clicks: 0, streak: 0, first_seen: null, days_played: 1, last_click: null };
+      if (playerRes.rows[0]) {
+        const p = playerRes.rows[0];
+        player = {
+          id: p.id,
+          nickname: p.nickname,
+          clicks: parseInt(p.clicks) || 0,
+          rank: p.rank,
+          total_clicks: Number(p.total_clicks || 0),
+          streak: Number(p.streak || 0),
+          first_seen: p.first_seen,
+          days_played: Number(p.days_played || 1),
+          last_click: p.last_click
+        };
+      }
+
+      const data = JSON.stringify({ day: currentDay, todayClicks, yesterdayClicks, remaining, secondsLeft, leaderboard, player });
+      try {
+        client.write('data: ' + data + '\n\n');
+      } catch (err) {
+        clients.delete(client);
+      }
     }
-
-    const data = JSON.stringify({ day: currentDay, todayClicks, yesterdayClicks, remaining, secondsLeft, leaderboard, player });
-    try { client.write('data: ' + data + '\n\n'); } catch (_) { clients.delete(client); }
+  } catch (err) {
+    console.error('broadcast error', err);
   }
 }
 setInterval(broadcast, 500);
 
 async function checkDayEnd() {
-  const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
-  const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
-  const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
+  try {
+    const timeRes = await pool.query(`SELECT timestamp_value FROM game_state WHERE key = 'current_day'`);
+    const dayStart = timeRes.rows[0]?.timestamp_value || new Date();
+    const secondsLeft = Math.max(0, 86400 - Math.floor((Date.now() - new Date(dayStart)) / 1000));
 
-  if (secondsLeft <= 0) {
-    const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
-    const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
-    const today = parseInt(todayRes.rows[0].c) || 0;
-    const yesterday = parseInt(yesterdayRes.rows[0].c) || 0;
+    if (secondsLeft <= 0) {
+      const todayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay]);
+      const yesterdayRes = await pool.query('SELECT COUNT(*) as c FROM clicks WHERE day = $1', [currentDay + 1]);
+      const today = parseInt(todayRes.rows[0].c) || 0;
+      const yesterday = parseInt(yesterdayRes.rows[0].c) || 0;
 
-    if (today >= yesterday) {
-      currentDay = Math.max(0, currentDay - 1);
-      await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
+      if (today >= yesterday) {
+        currentDay = Math.max(0, currentDay - 1);
+        await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
 
-      const todayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 1]);
-      const yesterdayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 2]);
-      const yesterdaySet = new Set(yesterdayActive.rows.map(r => r.player_id));
+        const todayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 1]);
+        const yesterdayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 2]);
+        const yesterdaySet = new Set(yesterdayActive.rows.map(r => r.player_id));
 
-      for (const { player_id } of todayActive.rows) {
-        const wasYesterday = yesterdaySet.has(player_id);
-        if (wasYesterday) {
-          await pool.query('UPDATE players SET streak = streak + 1, days_played = days_played + 1 WHERE id = $1', [player_id]);
-        } else {
-          await pool.query('UPDATE players SET streak = 1, days_played = days_played + 1 WHERE id = $1', [player_id]);
+        for (const { player_id } of todayActive.rows) {
+          const wasYesterday = yesterdaySet.has(player_id);
+          if (wasYesterday) {
+            await pool.query('UPDATE players SET streak = streak + 1, days_played = days_played + 1 WHERE id = $1', [player_id]);
+          } else {
+            await pool.query('UPDATE players SET streak = 1, days_played = days_played + 1 WHERE id = $1', [player_id]);
+          }
         }
+        broadcast();
       }
-      broadcast();
     }
+  } catch (err) {
+    console.error('checkDayEnd error', err);
   }
 }
 setInterval(checkDayEnd, 1000);
