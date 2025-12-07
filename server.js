@@ -18,6 +18,20 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// FULL RESET ON EVERY DEPLOY IF ENV VAR IS SET
+if (process.env.RESET_ON_DEPLOY === 'true') {
+  (async () => {
+    try {
+      await pool.query('DELETE FROM clicks');
+      await pool.query('DELETE FROM players');
+      await pool.query('DELETE FROM game_state');
+      console.log('FULL RESET ON DEPLOY COMPLETED');
+    } catch (e) {
+      console.log('Reset failed (tables may not exist yet):', e.message);
+    }
+  })();
+}
+
 const MAX_CLICKS_PER_SECOND = 5;
 const clickTimes = new Map();
 let currentDay = 100;
@@ -49,6 +63,7 @@ async function ensureGameState() {
     if (!res.rows[0].timestamp_value) await pool.query(`UPDATE game_state SET timestamp_value = NOW() WHERE key = 'current_day'`);
   }
 }
+
 ensureGameState();
 ensureTables();
 
@@ -171,7 +186,6 @@ async function checkDayEnd() {
 }
 setInterval(checkDayEnd, 1000);
 
-// THIS IS THE ONLY LINE THAT WAS WRONG BEFORE
 app.post('/api/click', async (req, res) => {
   const playerId = getPlayerId(req, res);
   const now = Date.now();
@@ -183,7 +197,6 @@ app.post('/api/click', async (req, res) => {
   times.push(now);
   clickTimes.set(playerId, times.slice(-10));
 
-  // ← FIXED: added missing "id" column in the INSERT list
   await pool.query(`
     INSERT INTO players (id, total_clicks, last_click, first_seen)
     VALUES ($1, 1, NOW(), NOW())
