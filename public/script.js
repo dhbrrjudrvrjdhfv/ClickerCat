@@ -12,9 +12,9 @@ const playerClicks = document.getElementById('playerClicks');
 let gameLost = false;
 let lastPos = null;
 
-// store last payload
-let lastSSE = null;
+let secondsLeft = 86400; // default, will sync with server
 
+// Prompt for nickname if not set
 async function checkNickname() {
   const res = await fetch('/api/check-nickname');
   const data = await res.json();
@@ -24,9 +24,9 @@ async function checkNickname() {
       nick = prompt("Choose your permanent Nickname!\nBe respectful or no eligibility to rewards.")?.trim();
       if (!nick || nick.length < 1 || nick.length > 30) continue;
       const r = await fetch('/api/set-nickname', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nickname: nick })
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({nickname:nick})
       });
       const result = await r.json();
       if (result.success) break;
@@ -36,99 +36,61 @@ async function checkNickname() {
 }
 checkNickname();
 
+// Player info modal
 const playerInfoModal = document.createElement('div');
 playerInfoModal.id = 'playerInfoModal';
 playerInfoModal.className = 'hidden';
-playerInfoModal.innerHTML = `
-  <div id="playerInfoContent">
-    <button id="closePlayerInfo">X</button>
-    <div id="playerInfoData"></div>
-  </div>
-`;
+playerInfoModal.innerHTML = `<div id="playerInfoContent"><button id="closePlayerInfo">X</button><div id="playerInfoData"></div></div>`;
 document.body.appendChild(playerInfoModal);
-document.getElementById('closePlayerInfo')
-  .addEventListener('click', () => playerInfoModal.classList.add('hidden'));
+document.getElementById('closePlayerInfo').addEventListener('click', () => playerInfoModal.classList.add('hidden'));
 
-function rebuildModalIfOpen() {
-  if (!playerInfoModal.classList.contains('hidden')) {
-    const nickname = playerInfoModal.dataset.nickname;
-    const rank = Number(playerInfoModal.dataset.rank);
-    const clicks = Number(playerInfoModal.dataset.today);
-    showPlayerInfo(nickname, rank, clicks);
-  }
-}
-
-// updated showPlayerInfo → uses live SSE and supports auto-refresh
 window.showPlayerInfo = (nickname, rank, todayClicks) => {
-  playerInfoModal.dataset.nickname = nickname;
-  playerInfoModal.dataset.rank = rank;
-  playerInfoModal.dataset.today = todayClicks;
+  let leaderboard = [];
+  try {
+    const lastData = es.lastEventData ? JSON.parse(es.lastEventData) : {};
+    leaderboard = lastData.leaderboard || [];
+  } catch(e) {}
 
-  if (!lastSSE) return;
+  const player = leaderboard.find(p => p.nickname === nickname) || {
+    total_clicks: 0,
+    streak: 0,
+    first_seen: new Date().toISOString(),
+    days_played: 1,
+    last_click: null
+  };
 
-  const lb = lastSSE.leaderboard || [];
-  let player = lb.find(p => p.nickname === nickname);
-
-  if (!player && lastSSE.player && lastSSE.player.nickname === nickname) {
-    player = lastSSE.player;
-  }
-
-  if (!player) {
-    document.getElementById('playerInfoData').innerHTML = `
-      <div style="font-family:'Courier New',monospace;color:#fff;line-height:1.7;font-size:17px">
-        Player:     ${nickname}<br>
-        Rank:       #${rank}<br>
-        Today:      ${todayClicks}<br>
-        Lifetime:   ?<br>
-        Streak:     ?<br>
-        First seen: ?<br>
-        Avg/day:    ?<br><br>
-        UNKNOWN
-      </div>
-    `;
-    playerInfoModal.classList.remove('hidden');
-    return;
-  }
-
-  const avg = player.days_played > 0 ?
-    Math.round(player.total_clicks / player.days_played) : 0;
-  const online = player.last_click &&
-    (Date.now() - new Date(player.last_click)) < 60000;
-  const status = online
-    ? '<span style="color:#0f0">ONLINE</span>'
-    : '<span style="color:#f55">OFFLINE</span>';
-  const firstSeen = player.first_seen
-    ? new Date(player.first_seen).toLocaleDateString()
-    : '-';
+  const avg = player.days_played > 0 ? Math.round(player.total_clicks / player.days_played) : 0;
+  const online = player.last_click && (Date.now() - new Date(player.last_click)) < 60000;
+  const status = online ? '<span style="color:#0f0">ONLINE</span>' : '<span style="color:#f55">OFFLINE</span>';
+  const firstSeen = new Date(player.first_seen).toLocaleDateString();
 
   document.getElementById('playerInfoData').innerHTML = `
-    <div style="font-family:'Courier New',monospace;color:#fff;line-height:1.7;font-size:17px">
-      Player:     ${player.nickname}<br>
+    <div style="font-family:'Courier New',monospace;color:#fff;line-height:1.75;font-size:17px">
+      Player:     ${nickname}<br>
       Rank:       #${rank}<br>
-      Today:      ${todayClicks}<br>
-      Lifetime:   ${player.total_clicks}<br>
-      Streak:     ${player.streak} days<br>
+      Today:      ${todayClicks.toLocaleString()} clicks<br>
+      Lifetime:   ${player.total_clicks.toLocaleString()} clicks<br>
+      Streak:     ${player.streak} day${player.streak===1?'':'s'}<br>
       First seen: ${firstSeen}<br>
-      Avg/day:    ${avg}<br><br>
+      Avg/day:    ${avg.toLocaleString()} clicks<br>
+      <br>
       ${status}
     </div>
   `;
   playerInfoModal.classList.remove('hidden');
 };
 
+// Mole random position
 function randomPos() {
   const area = document.getElementById('gameArea');
   const maxX = area.clientWidth - 90;
   const maxY = area.clientHeight - 90;
   let x, y;
-  do {
-    x = Math.random() * maxX;
-    y = Math.random() * maxY;
-  } while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 150);
-  lastPos = { x, y };
-  return lastPos;
+  do { x = Math.random() * maxX; y = Math.random() * maxY; }
+  while (lastPos && Math.hypot(x - lastPos.x, y - lastPos.y) < 150);
+  lastPos = {x, y};
+  return {x, y};
 }
-
 function moveMoleForMe() {
   const pos = randomPos();
   mole.style.left = pos.x + 'px';
@@ -136,32 +98,20 @@ function moveMoleForMe() {
 }
 moveMoleForMe();
 
+// SSE connection
 const es = new EventSource('/api/live');
 es.onmessage = e => {
+  es.lastEventData = e.data; // store last SSE message for modal lookup
   const d = JSON.parse(e.data);
-  lastSSE = d;
 
-  // LIVE update of modal if opened
-  rebuildModalIfOpen();
+  // Update countdown
+  secondsLeft = d.secondsLeft;
 
-  if (!gameLost && d.remaining > 0 && d.secondsLeft <= 0) {
-    gameLost = true;
-    mole.style.display = 'none';
-    document.querySelectorAll('.stat').forEach(el =>
-      el.classList.add('game-over'));
-  }
-
+  // Update stats
   daySpan.textContent = d.day;
   yesterdaySpan.textContent = d.yesterdayClicks;
   todaySpan.textContent = d.todayClicks;
   remainingSpan.textContent = d.remaining;
-
-  timeSpan.textContent =
-    d.secondsLeft <= 0
-      ? "00:00:00"
-      : `${String(Math.floor(d.secondsLeft/3600)).padStart(2,'0')}:` +
-        `${String(Math.floor((d.secondsLeft%3600)/60)).padStart(2,'0')}:` +
-        `${String(d.secondsLeft%60).padStart(2,'0')}`;
 
   if (d.player) {
     playerRank.textContent = d.player.rank === '-' ? '#−' : `#${d.player.rank}`;
@@ -169,38 +119,47 @@ es.onmessage = e => {
     playerClicks.textContent = `${d.player.clicks} Clicks Today`;
   }
 
-  // leaderboard with color-coded online/offline
-  leaderboardList.innerHTML = d.leaderboard.map((p, i) => {
-    const online = p.last_click &&
-      (Date.now() - new Date(p.last_click)) < 60000;
-
-    return `
-      <div class="leaderboard-entry">
-        <div class="leaderboard-entry-left">
-          #${i + 1}
-          <span style="color:${online ? '#0f0' : '#f55'}">
-            ${p.nickname}
-          </span>
+  // Update leaderboard
+  if (d.leaderboard) {
+    leaderboardList.innerHTML = d.leaderboard.map((p, i) => {
+      const online = p.last_click && (Date.now() - new Date(p.last_click)) < 60000;
+      const color = online ? '#0f0' : '#f55';
+      return `
+        <div class="leaderboard-entry">
+          <div class="leaderboard-entry-left" style="color:${color}">#${i+1} ${p.nickname}</div>
+          <div class="leaderboard-entry-right">
+            <span>${p.clicks}</span>
+            <button class="info-btn" onclick="showPlayerInfo('${p.nickname}',${i+1},${p.clicks})">I</button>
+          </div>
         </div>
-        <div class="leaderboard-entry-right">
-          <span>${p.clicks}</span>
-          <button class="info-btn"
-            onclick="showPlayerInfo('${p.nickname.replace(/'/g,"\\'")}',${i+1},${p.clicks})">
-            I
-          </button>
-        </div>
-      </div>
-    `;
-  }).join('');
-};
+      `;
+    }).join('');
+  }
 
-mole.onclick = async () => {
-  if (!gameLost) {
-    moveMoleForMe();
-    await fetch('/api/click', { method: 'POST' });
+  // Check game over
+  if (!gameLost && d.remaining > 0 && d.secondsLeft <= 0) {
+    gameLost = true;
+    mole.style.display = 'none';
+    document.querySelectorAll('.stat').forEach(el => el.classList.add('game-over'));
   }
 };
 
-skipBtn.onclick = async () => {
-  await fetch('/api/skip-day', { method: 'POST' });
+// Local countdown for smooth timer
+setInterval(() => {
+  if (secondsLeft > 0) secondsLeft--;
+  const h = String(Math.floor(secondsLeft/3600)).padStart(2,'0');
+  const m = String(Math.floor((secondsLeft%3600)/60)).padStart(2,'0');
+  const s = String(secondsLeft%60).padStart(2,'0');
+  timeSpan.textContent = `${h}:${m}:${s}`;
+}, 1000);
+
+// Mole click
+mole.onclick = async () => {
+  if (!gameLost) {
+    moveMoleForMe();
+    await fetch('/api/click', {method:'POST'});
+  }
 };
+
+// Skip day click
+skipBtn.onclick = async () => await fetch('/api/skip-day', {method:'POST'});
