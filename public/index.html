@@ -6,7 +6,6 @@
   <title>ClickerCat</title>
   <link rel="stylesheet" href="style.css">
  
-  <!-- YOUR CAT IS NOW THE FAVICON -->
   <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link rel="shortcut icon" href="/favicon.ico">
   <link rel="apple-touch-icon" href="/favicon.ico">
@@ -32,9 +31,107 @@
         <div id="playerRank">#-</div>
         <div id="playerNick">-</div>
         <div id="playerClicks">0 Clicks Today</div>
+        <div id="helpBtn">Help</div>
       </div>
     </div>
   </main>
+
+  <div id="welcomeOverlay" class="hidden">
+    <div id="welcomeContent">
+      <h1>ClickerCat</h1>
+      <p class="welcome-question">Have you played ClickerCat before?</p>
+      <div class="welcome-buttons">
+        <button id="welcomeNo" class="welcome-btn-no">No</button>
+        <button id="welcomeYes" class="welcome-btn-yes">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tutorialOverlay" class="hidden">
+    <div id="tutorialContent">
+      <h1>ClickerCat</h1>
+      <p class="tutorial-intro">Welcome to ClickerCat! Here's how to survive.</p>
+      
+      <div class="tutorial-section">
+        <h2>The Goal</h2>
+        <div class="mock-stats">
+          <div class="mock-stat">Yesterday's Clicks<br><span>50</span></div>
+          <div class="mock-stat">Remaining Clicks<br><span>23</span></div>
+          <div class="mock-stat">Today's Clicks<br><span>27</span></div>
+          <div class="mock-stat">Time Left<br><span>12:34:56</span></div>
+          <div class="mock-stat">Day<br><span>100</span></div>
+        </div>
+        <p>The goal is simple: Click more than yesterday, or the game ends.</p>
+        <ul>
+          <li>Yesterday had 50 clicks</li>
+          <li>You need 23 more clicks before time runs out</li>
+          <li>Currently at Day 100 - each day you succeed, the number goes DOWN</li>
+        </ul>
+      </div>
+
+      <div class="tutorial-section">
+        <h2>How to Click</h2>
+        <div class="mock-mole-container">
+          <div class="mock-mole">CLICK</div>
+          <span class="arrow">←</span>
+        </div>
+        <p>Click the moving target to add clicks. It moves after each click.</p>
+        <p>You can click up to 5 times per second.</p>
+      </div>
+
+      <div class="tutorial-section">
+        <h2>The Timer</h2>
+        <div class="mock-timer">Time Left: 23:59:45</div>
+        <p>You have 24 hours each day. When it hits 00:00:00:</p>
+        <ul>
+          <li>If you beat yesterday's count → Day decreases, continue playing</li>
+          <li>If you didn't → Game Over (red X appears)</li>
+        </ul>
+      </div>
+
+      <div class="tutorial-section">
+        <h2>Leaderboard</h2>
+        <div class="mock-leaderboard">
+          <div class="mock-lb-entry">
+            <span>#1 Player1</span>
+            <span>45 <button class="mock-info-btn">I</button></span>
+          </div>
+          <div class="mock-lb-entry">
+            <span>#2 Player2</span>
+            <span>38 <button class="mock-info-btn">I</button></span>
+          </div>
+          <div class="mock-lb-entry">
+            <span>#3 Player3</span>
+            <span>32 <button class="mock-info-btn">I</button></span>
+          </div>
+        </div>
+        <ul>
+          <li><span style="color:#0f0">Green names</span> = online now</li>
+          <li><span style="color:#f55">Red names</span> = offline</li>
+          <li>Click [I] button to see detailed player stats</li>
+        </ul>
+      </div>
+
+      <div class="tutorial-section">
+        <h2>Your Stats</h2>
+        <div class="mock-player-stats">
+          <div>#5</div>
+          <div>YourName</div>
+          <div>27 Clicks Today</div>
+        </div>
+        <p>Track your personal rank and progress here.</p>
+      </div>
+
+      <div class="tutorial-section">
+        <h2>Skip Day (Optional)</h2>
+        <div class="mock-skip">SKIP DAY</div>
+        <p>Testing feature: Jump timer to last 3 seconds.</p>
+      </div>
+
+      <button id="tutorialGotIt">Got It!</button>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>
