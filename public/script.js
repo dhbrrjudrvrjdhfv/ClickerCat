@@ -1,3 +1,35 @@
+// Check if first visit
+const hasVisited = localStorage.getItem('hasVisitedClickerCat');
+const welcomeOverlay = document.getElementById('welcomeOverlay');
+const tutorialOverlay = document.getElementById('tutorialOverlay');
+const welcomeYes = document.getElementById('welcomeYes');
+const welcomeNo = document.getElementById('welcomeNo');
+const tutorialGotIt = document.getElementById('tutorialGotIt');
+const helpBtn = document.getElementById('helpBtn');
+
+if (!hasVisited) {
+  welcomeOverlay.classList.remove('hidden');
+}
+
+welcomeYes.onclick = () => {
+  localStorage.setItem('hasVisitedClickerCat', 'true');
+  welcomeOverlay.classList.add('hidden');
+};
+
+welcomeNo.onclick = () => {
+  welcomeOverlay.classList.add('hidden');
+  tutorialOverlay.classList.remove('hidden');
+};
+
+tutorialGotIt.onclick = () => {
+  localStorage.setItem('hasVisitedClickerCat', 'true');
+  tutorialOverlay.classList.add('hidden');
+};
+
+helpBtn.onclick = () => {
+  tutorialOverlay.classList.remove('hidden');
+};
+
 const mole = document.getElementById('mole');
 const skipBtn = document.getElementById('skipBtn');
 const todaySpan = document.getElementById('today');
