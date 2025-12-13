@@ -172,11 +172,12 @@ async function checkDayEnd() {
     const yesterday = parseInt(yesterdayRes.rows[0].c) || 0;
 
     if (today >= yesterday) {
+      const oldDay = currentDay;
       currentDay = Math.max(0, currentDay - 1);
       await pool.query(`UPDATE game_state SET value = $1, timestamp_value = NOW() WHERE key = 'current_day'`, [currentDay]);
 
-      const todayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 1]);
-      const yesterdayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [currentDay + 2]);
+      const todayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [oldDay]);
+      const yesterdayActive = await pool.query('SELECT DISTINCT player_id FROM clicks WHERE day = $1', [oldDay + 1]);
       const yesterdaySet = new Set(yesterdayActive.rows.map(r => r.player_id));
 
       for (const { player_id } of todayActive.rows) {
@@ -237,11 +238,10 @@ app.get('/api/check-nickname', async (req, res) => {
 });
 
 app.post('/api/skip-day', async (req, res) => {
-  await pool.query(`UPDATE game_state SET timestamp_value = NOW() - INTERVAL '86397 seconds' WHERE key = 'current_day'`);
+  await pool.query(`UPDATE game_state SET timestamp_value = NOW() - INTERVAL '86400 seconds' WHERE key = 'current_day'`);
   broadcast();
   res.json({ success: true });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT} – Day ${currentDay}`));
-
