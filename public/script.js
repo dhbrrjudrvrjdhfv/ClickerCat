@@ -161,7 +161,7 @@ es.onmessage = e => {
       ? "00:00:00"
       : `${String(Math.floor(d.secondsLeft/3600)).padStart(2,'0')}:` +
         `${String(Math.floor((d.secondsLeft%3600)/60)).padStart(2,'0')}:` +
-        `${String(d.secondsLeft%60).padStart(2,'0')}`;
+        `${String(Math.floor(d.secondsLeft%60)).padStart(2,'0')}`;
 
   if (d.player) {
     playerRank.textContent = d.player.rank === '-' ? '#−' : `#${d.player.rank}`;
